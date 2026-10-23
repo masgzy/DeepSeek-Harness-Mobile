@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">DeepSeek Harness Mobile</string>
+  <string name="engine_channel_name">dsh 引擎</string>
+  <string name="engine_channel_desc">DeepSeek Harness 引擎运行状态与保活通知</string>
+  <string name="engine_notification_title">dsh 引擎运行中</string>
+  <string name="engine_notification_text">DeepSeek Harness 正在 127.0.0.1:%1$d 提供服务，点击返回应用。</string>
+</resources>
