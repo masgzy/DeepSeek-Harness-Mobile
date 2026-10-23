@@ -8,7 +8,10 @@ plugins {
 
 android {
   namespace = "io.github.masgzy.dshm"
-  compileSdk = 36
+  // compileSdk 37：AndroidX 2026-10 版本线（navigation 2.10.x / compose BOM
+  // 2026.09.00 等）要求 compileSdk >= 37；targetSdk 保持 34 不受影响
+  // （运行时行为仅由 targetSdk 决定）。
+  compileSdk = 37
 
   defaultConfig {
     applicationId = "io.github.masgzy.dshm"
