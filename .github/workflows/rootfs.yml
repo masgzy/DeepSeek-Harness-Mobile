@@ -1,0 +1,79 @@
+# 预装运行时镜像构建：Ubuntu 26.04 + Node 24 LTS + dsh
+# 每周自动构建 + 支持手动触发；产物发布到 runtime-nightly 预发布供 APK 下载
+name: Runtime Build
+
+on:
+  schedule:
+    # 每周一 03:00 UTC（北京时间 11:00）
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: 'dsh 版本（留空则用仓库默认）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  runtime:
+    name: 构建预装运行时 (arm64)
+    runs-on: ubuntu-latest
+    env:
+      DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.2' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装交叉执行依赖（qemu-user-static + proot）
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y proot qemu-user-static xz-utils
+
+      - name: 构建预装运行时
+        run: |
+          chmod +x runtime/build-rootfs.sh
+          OUT=runtime/out ./runtime/build-rootfs.sh
+
+      - name: 生成校验和
+        id: sums
+        run: |
+          cd runtime/out
+          sha256sum * > SHA256SUMS.txt
+          echo "bundle=$(ls dsh-runtime-*.tar.xz)" >> "$GITHUB_OUTPUT"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-runtime-arm64
+          path: |
+            runtime/out/dsh-runtime-*.tar.xz
+            runtime/out/manifest.json
+            runtime/out/SHA256SUMS.txt
+          retention-days: 14
+
+  publish:
+    name: 发布 runtime-nightly
+    needs: runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-runtime-arm64
+          path: dist
+
+      - name: 发布/更新 runtime-nightly 预发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view runtime-nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create runtime-nightly \
+                 --repo "$GITHUB_REPOSITORY" \
+                 --prerelease --latest=false \
+                 --title "runtime-nightly 预装运行时镜像" \
+                 --notes "CI 自动构建的预装运行时（Ubuntu 26.04 + Node.js + dsh）。manifest.json 供 APK 的「预装运行时」通道消费；SHA256SUMS.txt 供人工校验。"
+          gh release upload runtime-nightly dist/* \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          # 重新指向 latest manifest 的稳定 URL 语义（APK UpdateManager 固定取该 tag）
+          echo "runtime-nightly 已更新：$(ls dist)"
