@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">DeepSeek Harness Mobile</string>
+  <string name="engine_channel_name">dsh engine</string>
+  <string name="engine_channel_desc">DeepSeek Harness engine status and keep-alive notifications</string>
+  <string name="engine_notification_title">dsh engine running</string>
+  <string name="engine_notification_text">DeepSeek Harness is serving on 127.0.0.1:%1$d. Tap to return.</string>
+</resources>

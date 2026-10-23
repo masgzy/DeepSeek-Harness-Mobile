@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <!-- 引擎前台保活（Android 8.0+ 前台服务 + dataSync 类型） -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <!-- Android 13+ 运行时通知权限 -->
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- 看门狗定时器 -->
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+  <application
+      android:name=".DshmApplication"
+      android:allowBackup="false"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher"
+      android:label="@string/app_name"
+      android:supportsRtl="true"
+      android:networkSecurityConfig="@xml/network_security_config"
+      android:theme="@style/Theme.Dshm"
+      tools:targetApi="34">
+
+    <activity
+        android:name=".MainActivity"
+        android:exported="true"
+        android:launchMode="singleTask"
+        android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+        android:windowSoftInputMode="adjustResize">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+
+    <service
+        android:name=".engine.EngineService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
+  </application>
+</manifest>

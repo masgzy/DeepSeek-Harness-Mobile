@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+local.properties
+
+# CI 签名密钥 —— 严禁入库，签名密钥只应存在于 GitHub Secrets
+release.keystore
+*.jks
+*.keystore
+
+# 构建期生成的运行时资产（由 CI 的 scripts/fetch-proot.sh 下载注入）
+app/src/main/assets/proot/
+app/src/main/assets/runtime/
+
+# 运行时镜像构建产物
+runtime/out/
+*.tar.gz
+*.tar.xz
+
+# 日志与临时文件
+*.log
+.DS_Store

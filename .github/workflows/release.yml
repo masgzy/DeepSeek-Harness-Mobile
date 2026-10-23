@@ -1,0 +1,228 @@
+# 正式发版流水线：tag v* 触发
+# 产出：arm64-v8a Release APK + 预装运行时 bundle + 规范化 Release Notes
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的 tag（如 v1.0.0-alpha.1）'
+        required: true
+        default: 'v1.0.0-alpha.1'
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: 构建 Release APK (arm64-v8a)
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version_name: ${{ steps.tag.outputs.version_name }}
+      ephemeral: ${{ steps.keystore.outputs.ephemeral }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-36 platform-tools'
+          accept-android-sdk-licenses: 'true'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 解析版本号
+        id: tag
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ inputs.version }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # 版本号公式（保证任意 tag 单调递增）：
+          #   base = M*10_000_000 + m*100_000 + p*1_000
+          #   预发布后缀：alpha.N -> +N；beta.N -> +100+N；rc.N -> +200+N；正式版 -> +900
+          VER="${TAG#v}"
+          BASE="${VER%%-*}"
+          IFS='.' read -r MAJ MIN PAT <<< "$BASE"
+          CODE=$((MAJ * 10000000 + MIN * 100000 + PAT * 1000))
+          case "${VER#$BASE}" in
+            -alpha.*) N="${VER#*-alpha.}"; CODE=$((CODE + N));;
+            -beta.*)  N="${VER#*-beta.}";  CODE=$((CODE + 100 + N));;
+            -rc.*)    N="${VER#*-rc.}";    CODE=$((CODE + 200 + N));;
+            *)                      CODE=$((CODE + 900));;
+          esac
+          echo "version_name=$VER" >> "$GITHUB_OUTPUT"
+          echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG version=$VER code=$CODE"
+
+      - name: 注入 proot 运行时资产
+        run: ./scripts/fetch-proot.sh
+
+      - name: 准备签名密钥
+        id: keystore
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
+            echo "$RELEASE_KEYSTORE_B64" | base64 -d > release.keystore
+            keytool -list -keystore release.keystore -storepass "${RELEASE_STORE_PASSWORD:-dshm-release}" \
+              >/dev/null 2>&1 || {
+              echo "keystore secret 校验失败" >&2; exit 1; }
+            echo "ephemeral=false" >> "$GITHUB_OUTPUT"
+            echo "使用 GitHub Secrets 提供的正式签名密钥"
+          else
+            # 首发策略：未配置正式密钥时生成一次性密钥并在 Release Notes 中显著声明。
+            # 稳定版（非预发布）必须先配置 RELEASE_KEYSTORE_B64，流程在此直接失败。
+            case "${{ steps.tag.outputs.version_name }}" in
+              *-alpha.*|*-beta.*|*-rc.*)
+                keytool -genkeypair -v -keystore release.keystore \
+                  -storepass dshm-release -keypass dshm-release \
+                  -alias release -keyalg RSA -keysize 2048 -validity 10000 \
+                  -dname "CN=DeepSeek-Harness-Mobile CI, OU=CI, O=masgzy, L=CN"
+                echo "ephemeral=true" >> "$GITHUB_OUTPUT"
+                echo "警告：alpha 预发布使用一次性签名密钥（APK 无法覆盖安装升级）"
+                ;;
+              *)
+                echo "正式版必须配置 RELEASE_KEYSTORE_B64 签名密钥 secret" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+      - name: 构建 Release APK
+        env:
+          RELEASE_STORE_PASSWORD: dshm-release
+          RELEASE_KEY_ALIAS: release
+          RELEASE_KEY_PASSWORD: dshm-release
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PversionName=${{ steps.tag.outputs.version_name }} \
+            -PversionCode=${{ steps.tag.outputs.version_code }}
+
+      - name: 重命名产物
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk \
+            "dist/DeepSeek-Harness-Mobile-${{ steps.tag.outputs.tag }}-arm64-v8a.apk"
+          ls -la dist/
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: dist/*.apk
+
+  runtime:
+    name: 构建预装运行时
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: 安装交叉执行依赖
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y proot qemu-user-static xz-utils
+      - name: 构建预装运行时
+        run: |
+          chmod +x runtime/build-rootfs.sh
+          OUT=runtime/out ./runtime/build-rootfs.sh
+      - name: 生成校验和
+        run: |
+          cd runtime/out && sha256sum * > SHA256SUMS.txt
+      - name: 上传运行时产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-bundle
+          path: |
+            runtime/out/dsh-runtime-*.tar.xz
+            runtime/out/manifest.json
+            runtime/out/SHA256SUMS.txt
+
+  publish:
+    name: 发布 Release
+    needs: [apk, runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成校验和与 Release Notes
+        env:
+          TAG: ${{ needs.apk.outputs.tag }}
+          EPHEMERAL: ${{ needs.apk.outputs.ephemeral }}
+        run: |
+          cd dist
+          sha256sum *.apk *.tar.xz manifest.json > SHA256SUMS.txt 2>/dev/null || \
+            sha256sum * > SHA256SUMS.txt
+          cat > "$GITHUB_WORKSPACE/release_notes.md" <<'HEADER'
+          > DeepSeek Harness Mobile —— 免 root 在 Android 上运行 DeepSeek Harness 的原生容器方案。
+
+          HEADER
+          cat >> "$GITHUB_WORKSPACE/release_notes.md" <<NOTES
+          ## 📦 下载
+
+          | 文件 | 说明 |
+          | --- | --- |
+          | \`DeepSeek-Harness-Mobile-$TAG-arm64-v8a.apk\` | 应用主程序（arm64-v8a，Android 8.0+） |
+          | \`dsh-runtime-ubuntu26.04-arm64-*.tar.xz\` | 预装运行时镜像（App 内「预装运行时」通道自动下载） |
+          | \`manifest.json\` | 预装运行时清单（版本 / SHA-256 / 字节数） |
+
+          ## ✅ SHA-256 校验
+
+          \`\`\`
+          $(cat dist/SHA256SUMS.txt)
+          \`\`\`
+
+          ## 🚀 安装说明
+
+          1. 下载 APK 安装（需允许「安装未知应用」）；
+          2. 首次启动按向导安装：推荐「官方 rootfs + 在线安装」（约 30MB 下载），
+             或选择「预装运行时」直接下载本页 bundle（约 200MB，无需容器内联网安装）；
+          3. 启动引擎后在 App 内使用 dsh 官方 Web UI，API Key 在 Web UI 设置中填写。
+
+          ## ⚠️ 注意事项
+
+          - 本项目为社区驱动，与 DeepSeek 官方无关；dsh 处于 developer preview，接口可能变动。
+          - $([ "$EPHEMERAL" = "true" ] && echo "**本预发布 APK 使用一次性签名密钥构建，无法覆盖安装后续版本；正式密钥配置后将保持稳定。**" || echo "APK 使用仓库配置的正式签名密钥，可覆盖安装升级。")
+
+          ## 🔗 变更明细
+
+          见 [CHANGELOG.md](https://github.com/masgzy/DeepSeek-Harness-Mobile/blob/main/CHANGELOG.md)。
+
+          **Full Changelog**: https://github.com/masgzy/DeepSeek-Harness-Mobile/commits/$TAG
+          NOTES
+          # 清理行首缩进（heredoc 带缩进写入时统一去掉 10 空格前缀）
+          sed -i 's/^          //' "$GITHUB_WORKSPACE/release_notes.md" || true
+          cat "$GITHUB_WORKSPACE/release_notes.md"
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.apk.outputs.tag }}
+          name: DeepSeek Harness Mobile ${{ needs.apk.outputs.tag }}
+          body_path: release_notes.md
+          prerelease: ${{ contains(needs.apk.outputs.tag, 'alpha') || contains(needs.apk.outputs.tag, 'beta') || contains(needs.apk.outputs.tag, 'rc') }}
+          files: |
+            dist/*.apk
+            dist/*.tar.xz
+            dist/manifest.json
+            dist/SHA256SUMS.txt

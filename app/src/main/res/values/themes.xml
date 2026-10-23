@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Compose 应用使用 Material3 Compose 主题，此主题仅作为窗口级基座 -->
+  <style name="Theme.Dshm" parent="android:Theme.Material.Light.NoActionBar">
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">true</item>
+  </style>
+</resources>
