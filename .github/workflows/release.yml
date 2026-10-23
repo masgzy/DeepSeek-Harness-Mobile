@@ -117,8 +117,10 @@ jobs:
       - name: 重命名产物
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk \
-            "dist/DeepSeek-Harness-Mobile-${{ steps.tag.outputs.tag }}-arm64-v8a.apk"
+          APK="$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -1)"
+          [ -n "$APK" ] || { echo "未找到 release APK 产物"; ls -R app/build/outputs/apk/ || true; exit 1; }
+          echo "找到产物: $APK"
+          cp "$APK" "dist/DeepSeek-Harness-Mobile-${{ steps.tag.outputs.tag }}-arm64-v8a.apk"
           ls -la dist/
 
       - name: 上传 APK 产物
