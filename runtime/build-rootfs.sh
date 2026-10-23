@@ -73,7 +73,7 @@ chmod +x "$ROOTFS/dshm/bootstrap.sh"
 printf 'nameserver 223.5.5.5\nnameserver 8.8.8.8\n' > "$ROOTFS/etc/resolv.conf"
 
 # ---- 4. 容器内执行 bootstrap（x86 用 qemu 模拟 arm64） ----
-PROOT_ARGS=(proot --kill-on-exit -0 -r "$ROOTFS" -b /dev -b /proc -b /sys -w /root)
+PROOT_ARGS=(proot -0 -r "$ROOTFS" -b /dev -b /proc -b /sys -w /root)
 if [ "$IS_CROSS" = "1" ]; then
   # qemu 静态二进制须在容器内可见
   cp "$QEMU" "$ROOTFS/usr/bin/qemu-aarch64-static"
@@ -81,6 +81,8 @@ if [ "$IS_CROSS" = "1" ]; then
 fi
 
 log "容器内执行 bootstrap（安装 Node + dsh，qemu 下需数分钟）..."
+# 注意：runner 上 apt 安装的是 proot-me 5.x，不支持 Termux 分支的
+# --kill-on-exit 选项；构建期一次性执行无需该清理选项，故省略。
 env -i HOME=/root \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   TERM=xterm-256color DEBIAN_FRONTEND=noninteractive \

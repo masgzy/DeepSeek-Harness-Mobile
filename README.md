@@ -95,7 +95,7 @@
 ## 🛠 从源码构建
 
 ```bash
-# 1. 环境要求：JDK 17 + Android SDK (API 36)
+# 1. 环境要求：JDK 17 + Android SDK (API 37)
 # 2. 注入 proot 运行时资产（从 Termux 官方源获取）
 ./scripts/fetch-proot.sh
 

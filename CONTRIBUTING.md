@@ -7,7 +7,7 @@
 | 组件 | 版本要求 |
 | --- | --- |
 | JDK | 17+ |
-| Android SDK | API 36（compileSdk） |
+| Android SDK | API 37（compileSdk） |
 | Android Studio | 最新稳定版（Narwhal 或更新） |
 | 设备 | arm64-v8a 真机（Android 8.0+） |
 
