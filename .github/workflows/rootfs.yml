@@ -25,10 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: 安装交叉执行依赖（qemu-user-static + proot）
+      - name: 安装打包依赖
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y proot qemu-user-static xz-utils
+          sudo apt-get install -y xz-utils
 
       - name: 构建预装运行时
         run: |
