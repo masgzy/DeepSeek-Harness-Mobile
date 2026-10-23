@@ -111,25 +111,36 @@ object TarExtractor {
     }
   }
 
+  // 权限位常量（Kotlin 无八进制字面量，用十进制：0777/0700/rwxrwxrwx 等）
+  private const val PERM_MASK = 511        // 0o777
+  private const val PERM_RWX_OWNER = 448   // 0o700
+  private const val PERM_R_OWNER = 256     // 0o400
+  private const val PERM_W_OWNER = 128     // 0o200
+  private const val PERM_X_OWNER = 64      // 0o100
+  private const val PERM_R_GROUP = 32      // 0o040
+  private const val PERM_W_GROUP = 16      // 0o020
+  private const val PERM_X_GROUP = 8       // 0o010
+  private const val PERM_R_OTHER = 4       // 0o004
+  private const val PERM_W_OTHER = 2       // 0o002
+  private const val PERM_X_OTHER = 1       // 0o001
+
   private fun safeMode(mode: Int, isDir: Boolean): Int {
-    val perm = mode and 0o777
+    val perm = mode and PERM_MASK
     // 目录至少保证可进入；文件保留执行位即可（属主为应用 uid）
-    return if (isDir) perm or 0o700 else perm
+    return if (isDir) perm or PERM_RWX_OWNER else perm
   }
 
   private fun chmod(target: File, mode: Int) {
-    if (android.os.Build.VERSION.SDK_INT >= 26) {
-      val perms = EnumSet.noneOf(PosixFilePermission::class.java)
-      if (mode and 0o400 != 0) perms.add(PosixFilePermission.OWNER_READ)
-      if (mode and 0o200 != 0) perms.add(PosixFilePermission.OWNER_WRITE)
-      if (mode and 0o100 != 0) perms.add(PosixFilePermission.OWNER_EXECUTE)
-      if (mode and 0o040 != 0) perms.add(PosixFilePermission.GROUP_READ)
-      if (mode and 0o020 != 0) perms.add(PosixFilePermission.GROUP_WRITE)
-      if (mode and 0o010 != 0) perms.add(PosixFilePermission.GROUP_EXECUTE)
-      if (mode and 0o004 != 0) perms.add(PosixFilePermission.OTHERS_READ)
-      if (mode and 0o002 != 0) perms.add(PosixFilePermission.OTHERS_WRITE)
-      if (mode and 0o001 != 0) perms.add(PosixFilePermission.OTHERS_EXECUTE)
-      runCatching { Files.setPosixFilePermissions(target.toPath(), perms) }
-    }
+    val perms = EnumSet.noneOf(PosixFilePermission::class.java)
+    if (mode and PERM_R_OWNER != 0) perms.add(PosixFilePermission.OWNER_READ)
+    if (mode and PERM_W_OWNER != 0) perms.add(PosixFilePermission.OWNER_WRITE)
+    if (mode and PERM_X_OWNER != 0) perms.add(PosixFilePermission.OWNER_EXECUTE)
+    if (mode and PERM_R_GROUP != 0) perms.add(PosixFilePermission.GROUP_READ)
+    if (mode and PERM_W_GROUP != 0) perms.add(PosixFilePermission.GROUP_WRITE)
+    if (mode and PERM_X_GROUP != 0) perms.add(PosixFilePermission.GROUP_EXECUTE)
+    if (mode and PERM_R_OTHER != 0) perms.add(PosixFilePermission.OTHERS_READ)
+    if (mode and PERM_W_OTHER != 0) perms.add(PosixFilePermission.OTHERS_WRITE)
+    if (mode and PERM_X_OTHER != 0) perms.add(PosixFilePermission.OTHERS_EXECUTE)
+    runCatching { Files.setPosixFilePermissions(target.toPath(), perms) }
   }
 }
