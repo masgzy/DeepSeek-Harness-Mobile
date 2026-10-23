@@ -81,13 +81,14 @@ if [ "$IS_CROSS" = "1" ]; then
 fi
 
 log "容器内执行 bootstrap（安装 Node + dsh，qemu 下需数分钟）..."
-# 注意：runner 上 apt 安装的是 proot-me 5.x，不支持 Termux 分支的
-# --kill-on-exit 选项；构建期一次性执行无需该清理选项，故省略。
+# 注意：runner 上 apt 安装的是 proot-me 5.x，既不支持 Termux 分支的
+# --kill-on-exit，也不支持 `--` 参数分隔符；构建期一次性执行无需
+# 清理选项，命令直接跟在选项之后。
 env -i HOME=/root \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   TERM=xterm-256color DEBIAN_FRONTEND=noninteractive \
   DSH_VERSION="$DSH_VERSION" DSH_NPM_REGISTRY="$NPM_REGISTRY" \
-  "${PROOT_ARGS[@]}" -- /bin/bash /dshm/bootstrap.sh
+  "${PROOT_ARGS[@]}" /bin/bash /dshm/bootstrap.sh
 
 [ -f "$ROOTFS/root/.dshm/installed" ] || fail "安装标记缺失，bootstrap 未完成"
 

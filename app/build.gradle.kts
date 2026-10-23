@@ -32,9 +32,28 @@ android {
     noCompress += listOf("gz", "xz", "tgz")
   }
 
+  // CI 签名：release workflow 将 release.keystore 放到项目根目录时，
+  // release 构建自动使用该密钥（正式密钥来自 Secrets，alpha 首发
+  // 为一次性生成密钥）；本地无密钥时保持不签名。
+  if (rootProject.file("release.keystore").exists()) {
+    signingConfigs.create("ci") {
+      storeFile = rootProject.file("release.keystore")
+      storePassword = System.getenv("RELEASE_STORE_PASSWORD") ?: "dshm-release"
+      keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "release"
+      keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: "dshm-release"
+      // v1 签名兜底：部分 OEM 安装器拒绝仅 v2 的 APK
+      enableV1Signing = true
+      enableV2Signing = true
+      enableV3Signing = true
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = false
+      if (rootProject.file("release.keystore").exists()) {
+        signingConfig = signingConfigs.getByName("ci")
+      }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
