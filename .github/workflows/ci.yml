@@ -44,7 +44,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platforms;android-37 platform-tools'
+          packages: 'platforms;android-37.1 platform-tools'
           accept-android-sdk-licenses: 'true'
 
       - name: Set up Gradle
