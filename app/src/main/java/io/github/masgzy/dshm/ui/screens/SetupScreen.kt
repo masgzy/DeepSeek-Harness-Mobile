@@ -40,6 +40,8 @@ import io.github.masgzy.dshm.ui.AppViewModel
 @Composable
 fun SetupScreen(viewModel: AppViewModel) {
   val state by viewModel.setup.collectAsState()
+  val progress = state.progress
+  val error = state.error
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -128,17 +130,17 @@ fun SetupScreen(viewModel: AppViewModel) {
               style = MaterialTheme.typography.titleSmall,
             )
           }
-          if (state.running && state.progress != null) {
+          if (state.running && progress != null) {
             LinearProgressIndicator(
-              progress = { state.progress },
+              progress = { progress },
               modifier = Modifier.fillMaxWidth(),
             )
           } else if (state.running) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
           }
-          if (state.error != null) {
+          if (error != null) {
             Text(
-              state.error,
+              error,
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onErrorContainer,
             )
@@ -159,7 +161,7 @@ fun SetupScreen(viewModel: AppViewModel) {
               }
             }
           }
-          if (state.error != null && !state.running) {
+          if (error != null && !state.running) {
             Button(onClick = { viewModel.installOfficial() }) { Text("重试") }
           }
         }
