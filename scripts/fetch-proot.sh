@@ -46,17 +46,27 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$DEST" "$WORK/x"
 
+# 下载源：Termux 官方池 + 清华 TUNA 镜像（2026-10 官方池多次抽风——本地与
+# GitHub runner 均出现长时间无响应，镜像回退成为必选项）。
+# TERMUX_POOL_BASE 仍可显式覆盖（如本地走代理时指定其他镜像）。
+SOURCES=("$BASE" "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main/pool/main")
+
 fetch_deb() {
-  local name="$1" url="$2"
-  log "下载 $name: $url"
-  curl -sfL --retry 3 --connect-timeout 20 -o "$WORK/$name.deb" "$url" \
-    || fail "下载失败: $url"
+  local name="$1" relpath="$2"
+  for src in "${SOURCES[@]}"; do
+    log "下载 $name: $src/$relpath"
+    if curl -sfL --retry 3 --connect-timeout 20 -o "$WORK/$name.deb" "$src/$relpath"; then
+      return 0
+    fi
+    log "源不可用，尝试下一个: $name ($src)"
+  done
+  fail "下载失败（已尝试 ${#SOURCES[@]} 个源）: $relpath"
 }
 
 # ---- 下载三个 deb 包 ----
-fetch_deb proot "$BASE/p/proot/proot_${PROOT_VER}_${ABI}.deb"
-fetch_deb talloc "$BASE/libt/libtalloc/libtalloc_${TALLOC_VER}_${ABI}.deb"
-fetch_deb shmem "$BASE/liba/libandroid-shmem/libandroid-shmem_${SHMEM_VER}_${ABI}.deb"
+fetch_deb proot "p/proot/proot_${PROOT_VER}_${ABI}.deb"
+fetch_deb talloc "libt/libtalloc/libtalloc_${TALLOC_VER}_${ABI}.deb"
+fetch_deb shmem "liba/libandroid-shmem/libandroid-shmem_${SHMEM_VER}_${ABI}.deb"
 
 # ---- 解包（dpkg-deb 优先，回退 ar + tar，兼容 data.tar.xz / data.tar.zst） ----
 log "解包 deb ..."
