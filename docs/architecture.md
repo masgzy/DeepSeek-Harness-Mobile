@@ -38,29 +38,41 @@ proot 通过 ptrace 拦截系统调用实现路径翻译与 uid 伪装（`-0`）
 无需任何特权即可让 Ubuntu 用户态完整运行。dsh 与 AI 执行的 bash 命令
 全部落在真实 glibc 环境，兼容性与桌面 Linux 一致。
 
-### 2.2 targetSdk 锁定 34 的原因
+### 2.2 Android W^X 限制与 exec 方案（alpha.2 修正）
 
-Android 15 起（targetSdk ≥ 35），系统 SELinux 策略禁止应用执行
-`app_data_file` 域的 ELF——即应用私有目录里的 proot / node 二进制。
-**只要 targetSdk ≤ 34，该限制不生效**。因此：
+**关键事实（alpha.1 真机实证）**：Android 10 起，**targetSdk ≥ 29** 的应用
+即被 SELinux W^X 策略禁止 exec 应用数据目录（`app_data_file` 域）中的
+ELF —— 与 targetSdk 是否 ≤ 34 无关（alpha.1 在 targetSdk 34 下实测触发
+`error=13, Permission denied`）。仅 targetSdk ≤ 28（Termux 的选择）可
+保留 app 数据目录 exec 能力，但那是 Deprecated 路线（Google 已宣布未来
+移除）。
 
-- 当前锁定 `targetSdk = 34`；
-- 未来升级 targetSdk 35+ 前，需要迁移 exec 方案（例如把可执行文件
-  交给 `ProcessBuilder` 之外的方式、借助 `app_process`、或将 ELF 装入
-  jniLibs 经 `nativeLibraryDir` 执行——后者要求处理 16KB 页对齐与
-  SONAME 等打包细节，是路线图中「targetSdk 35+ 迁移方案」课题）。
+**采用方案（与 dphmoblie/deepseek-harness-android 的 targetSdk 35 实现
+同源）：proot 以 jniLibs 形态从 `nativeLibraryDir` 执行**：
 
-### 2.3 proot 资产注入方式：assets（当前） vs jniLibs（备选）
+- `nativeLibraryDir`（APK `lib/<abi>/` 解压产物）受包签名信任，
+  不受 W^X 限制，任意 targetSdk 均可 exec；
+- 访客 ELF 的 execve 会被 proot 改写为对 `PROOT_LOADER`（静态 ELF，
+  同样落在 nativeLibraryDir）的 execve，loader 再以 mmap 方式装载
+  真正的访客程序 —— 应用数据目录内自始至终不发生 execve；
+- 打包要点：`packaging.jniLibs.useLegacyPackaging = true`（否则新版
+  AGP 默认不解压 .so 到磁盘）；proot 本体 DT_NEEDED 中的
+  `libtalloc.so.2` 在 CI 期同长度补丁为 `libtalloc.so`（jniLibs 仅接受
+  `lib*.so` 命名）；压缩存储天然满足 16KB 页对齐设备要求。
 
-- **当前方案（assets）**：CI 期 `scripts/fetch-proot.sh` 从 Termux 官方源
-  下载 `proot / libtalloc / libandroid-shmem` 三个 aarch64 二进制，
-  放入 `app/src/main/assets/proot/arm64-v8a/`；运行时解压到
-  `filesDir/proot/`，**立即去除写位**（华为/EMUI W^X 策略：可执行文件
-  必须不可写），`LD_LIBRARY_PATH` 指向该目录。
-  优点：无 SONAME / 16KB 对齐约束，版本升级只需改脚本变量。
-- **备选方案（jniLibs）**：参照 dphmoblie 把 ELF 改名为 `lib*.so` 放进
-  `jniLibs/arm64-v8a/`，由系统安装器解压到只读的 `nativeLibraryDir`。
-  优点：天然满足 W^X；代价：需要处理 SONAME 重定向与 AGP 16KB 对齐校验。
+### 2.3 proot 资产注入方式：jniLibs（当前） vs assets（已废弃）
+
+- **当前方案（jniLibs）**：CI 期 `scripts/fetch-proot.sh` 从 Termux 官方源
+  下载 `proot / libtalloc / libandroid-shmem` 三个 aarch64 deb，提取出
+  四件套放入 `app/src/main/jniLibs/arm64-v8a/`：
+  `libdsh_proot.so`（本体）、`libdsh_proot_loader.so`（静态 loader）、
+  `libtalloc.so`（重命名）、`libandroid-shmem.so`；运行时经
+  `nativeLibraryDir` 执行，宿主环境注入 `PROOT_LOADER` /
+  `LD_LIBRARY_PATH` / `PROOT_TMP_DIR`（详见 `ProotRuntime` 类注释）。
+  就绪判定只查「存在且可读」：部分 ROM（荣耀）对提取文件的
+  `canExecute()` 恒为 false，但经符号链接/直接路径执行不受影响。
+- **已废弃（assets → filesDir）**：alpha.1 方案，解压到应用数据目录再
+  exec，被 W^X 拦截（`error=13`），不再使用。
 
 ### 2.4 双轨运行时供应
 
@@ -97,14 +109,18 @@ filesDir/
 │   ├── root/.dshm/installed # 安装完成标记
 │   ├── root/projects -> (bind) 宿主 workspace
 │   └── root/.dsh/           # dsh 配置与会话数据（DSH_HOME）
-├── proot/                   # proot + libtalloc.so.2 + libandroid-shmem.so（去写位）
-├── cache/                   # rootfs.tar.gz / node.tar.gz 下载缓存（SHA-256 校验后复用）
+├── cache/                   # rootfs.tar.gz / node.tar.gz / 运行时 bundle 下载缓存
 ├── workspace/               # 用户工作区（容器内 /root/projects）
 ├── dshm/bootstrap.sh        # 容器引导脚本（从 assets 注入）
 ├── etc/resolv.conf          # 容器 DNS（bind 进容器）
 └── logs/
     ├── engine.log           # 引擎 stdout/stderr
-    └── app.log              # 应用日志（AppLog）
+    ├── app.log              # 应用日志（AppLog）
+    └── crash.log            # 未捕获异常现场（全局崩溃处理器写入）
+
+另：proot 临时目录在 cacheDir/proot-tmp（PROOT_TMP_DIR）；
+proot 本体与依赖自 alpha.2 起随 APK jniLibs 分发，落在
+`applicationInfo.nativeLibraryDir`，不再占用 filesDir。
 ```
 
 用户可见路径：`Android/data/io.github.masgzy.dshm/files/workspace`
@@ -116,7 +132,7 @@ filesDir/
 | --- | --- |
 | 供应链 | 全部下载物 SHA-256 流式校验（常量时间比较）；双镜像回退但校验标准不放松 |
 | 解包 | tar 条目路径穿越防护（canonical path 必须落在目标目录内）；符号链接仅允许指向包内相对路径目标 |
-| 执行 | proot/node 落盘后去写位（W^X）；`env -i` 纯净容器环境，不泄漏宿主变量 |
+| 执行 | proot 四件套随 APK 分发（nativeLibraryDir，受签名信任）；`env -i` 纯净容器环境，不泄漏宿主变量 |
 | 网络 | networkSecurityConfig 仅放行 127.0.0.1/localhost 明文（dsh Web UI 本机访问），其余全部强制 HTTPS |
 | 数据 | rootfs/引擎数据全部在应用私有目录；卸载即清除；工作区在应用专属外部目录，无需存储权限 |
 | 假 root | proot `-0` 仅为容器内提供 root 视图（路径/uid 翻译），不涉及任何真实提权 |
@@ -134,8 +150,9 @@ filesDir/
 ## 6. 参考与致谢
 
 - [dphmoblie/deepseek-harness-android](https://github.com/dphmoblie/deepseek-harness-android)：
-  运行时清单/自检/合规声明的成熟范本；
-- [deepcode-lab/deepseek-harness-mobile](https://github.com/deepseek-harness-mobile)：
-  proot assets 方案、EngineService 看门狗与 CI 签名流程参考；
+  运行时清单/自检/合规声明的成熟范本；proot jniLibs 执行方案与
+  PROOT_LOADER 机制参考（targetSdk 35 真机验证），本项目 UI 亦以其为基准；
+- [deepcode-lab/deepseek-harness-mobile](https://github.com/deepcode-lab/deepseek-harness-mobile)：
+  EngineService 看门狗与 CI 签名流程参考（其 proot assets 方案已被本项目弃用）；
 - [Termux proot-distro](https://github.com/termux/termux-packages)：
   proot 启动参数（`--kill-on-exit -0 -r -b` 绑定集）来源。

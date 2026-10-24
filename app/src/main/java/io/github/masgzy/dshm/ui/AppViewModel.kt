@@ -61,7 +61,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   fun startEngine() {
     viewModelScope.launch(Dispatchers.IO) {
       val ok = engineManager.startEngine(port)
-      EngineService.start(getApplication())
+      if (ok) EngineService.start(getApplication())
       var waited = 0
       // 轮询等待 Web UI 就绪（最多 30s）
       while (ok && waited < 30_000 && !engineManager.isRunning) {
@@ -89,6 +89,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
+  /** 把异常链展开成可读的错误文案（UI 直接展示，不再只给最后一层 message）。 */
+  private fun describe(t: Throwable): String = buildString {
+    append(t.message ?: t.javaClass.simpleName)
+    var c = t.cause
+    var depth = 0
+    while (c != null && depth < 3) {
+      append("；原因: ").append(c.message ?: c.javaClass.simpleName)
+      c = c.cause
+      depth++
+    }
+  }
+
   // ---- 安装向导：官方 rootfs + 在线 bootstrap ----
   fun installOfficial() {
     if (_setup.value.running) return
@@ -106,10 +118,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
       } catch (t: Throwable) {
         AppLog.log("setup", "安装失败", t)
-        _setup.value = _setup.value.copy(
-          running = false,
-          error = t.message ?: t.javaClass.simpleName,
-        )
+        _setup.value = _setup.value.copy(running = false, error = describe(t))
       }
     }
   }
@@ -129,10 +138,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
       } catch (t: Throwable) {
         AppLog.log("setup", "预装运行时安装失败", t)
-        _setup.value = _setup.value.copy(
-          running = false,
-          error = t.message ?: t.javaClass.simpleName,
-        )
+        _setup.value = _setup.value.copy(running = false, error = describe(t))
       }
     }
   }

@@ -37,7 +37,11 @@ class RuntimeInstaller(private val context: Context) {
       onProgress("dsh 已安装", 1, 1)
       return
     }
-    prootRuntime.ensureProot()
+    if (!prootRuntime.runnerAvailable()) {
+      throw RuntimeException(
+        "proot 运行器缺失（该 APK 构建未包含 arm64-v8a 运行库，请从官方 Release 重新下载）",
+      )
+    }
 
     // 1) 下载 Node.js（已有校验通过的缓存则复用）
     val nodeArchive = File(Paths.cache(filesDir), Paths.NODE_TARBALL)
