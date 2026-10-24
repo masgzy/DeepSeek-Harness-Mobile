@@ -1,29 +1,36 @@
 package io.github.masgzy.dshm.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +39,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.github.masgzy.dshm.ui.components.BrandHeader
 import io.github.masgzy.dshm.ui.components.Phases
 import io.github.masgzy.dshm.ui.components.PhaseStyle
 import io.github.masgzy.dshm.ui.components.StatusBadge
@@ -40,14 +48,17 @@ import io.github.masgzy.dshm.ui.screens.EnvironmentScreen
 import io.github.masgzy.dshm.ui.screens.HomeScreen
 import io.github.masgzy.dshm.ui.screens.LogsScreen
 import io.github.masgzy.dshm.ui.screens.SettingsScreen
+import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 
 /**
- * 应用外壳：整版对齐 dphmoblie/deepseek-harness-android 的 app-shell——
- * 顶栏（品牌 + PhaseBadge）+ 主内容 + 底部三项导航（首页 / 环境 / 设置）。
+ * 应用外壳：整版对齐 dphmoblie/deepseek-harness-android 的 mobile-header +
+ * bottom-navigation —— 品牌 Header（brand-symbol + deepseek + HARNESS 徽章 +
+ * 全局阶段徽章）+ 主内容 + 底部三项导航（首页 / 环境 / 设置）。
  *
- * 未安装时只显示环境屏（安装引导与运行时管理一体），与参考项目
- * 「Onboarding → 打开对话」的两段式心智一致。
+ * 未安装时只显示环境屏（安装引导与运行时管理一体）。
+ * dsh 对话走独立全屏 HarnessActivity（门屏「打开对话」进入），与参考项目
+ * HarnessActivity 覆盖外壳的模式一致。
  */
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
@@ -78,45 +89,52 @@ fun AppRoot(viewModel: AppViewModel) {
   Scaffold(
     containerColor = MaterialTheme.colorScheme.background,
     topBar = {
-      Column(
-        Modifier
-          .fillMaxWidth()
-          .background(MaterialTheme.colorScheme.background)
-          .statusBarsPadding()
-          .padding(horizontal = 20.dp, vertical = 12.dp),
+      // mobile-header：表面底 + 下缘分隔线 + 投影（styles.css .mobile-header）
+      Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp,
       ) {
         Row(
-          Modifier.fillMaxWidth(),
+          Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .height(32.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          Column {
-            Text(
-              "DeepSeek Harness",
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-              "Mobile",
-              fontSize = 12.sp,
-              fontWeight = FontWeight.Medium,
-              color = LocalDshmPalette.current.muted,
-            )
+          BrandHeader()
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            StatusBadge(phase)
+            // 会话页右侧「应用设置」图标键（.header-settings）：44dp 表面灰底
+            if (current == "home") {
+              Box(
+                Modifier
+                  .size(44.dp)
+                  .background(
+                    LocalDshmPalette.current.surfaceMuted,
+                    RoundedCornerShape(DshmRadius.control.dp),
+                  )
+                  .clickable { goTo("settings") },
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  Icons.Outlined.Settings,
+                  contentDescription = "应用设置",
+                  tint = LocalDshmPalette.current.ink,
+                  modifier = Modifier.size(19.dp),
+                )
+              }
+            }
           }
-          StatusBadge(phase)
         }
       }
     },
     bottomBar = {
-      NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
-      ) {
-        NavItem(Icons.Rounded.Home, "首页", "home", current, goTo)
-        NavItem(Icons.Rounded.Memory, "环境", "environment", current, goTo)
-        NavItem(Icons.Outlined.Settings, "设置", "settings", current, goTo)
-      }
+      BottomNav(current, goTo)
     },
   ) { padding ->
     NavHost(
@@ -149,6 +167,35 @@ private fun currentPhase(
   else -> Phases.NOT_INSTALLED
 }
 
+/**
+ * 底部导航（.bottom-navigation）：表面底 + 上缘分隔线，每项为「图标 20 + 标签 11」
+ * 的扁平竖排按钮——选中蓝、未选中灰，无 M3 药丸指示器，对齐参考项目形态。
+ */
+@Composable
+private fun BottomNav(current: String, goTo: (String) -> Unit) {
+  val p = LocalDshmPalette.current
+  Surface(color = p.surface) {
+    Column {
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .height(1.dp)
+          .background(p.line),
+      )
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .navigationBarsPadding()
+          .height(58.dp),
+      ) {
+        NavItem(Icons.Rounded.ChatBubbleOutline, "首页", "home", current, goTo)
+        NavItem(Icons.Rounded.Memory, "环境", "environment", current, goTo)
+        NavItem(Icons.Outlined.Settings, "设置", "settings", current, goTo)
+      }
+    }
+  }
+}
+
 @Composable
 private fun androidx.compose.foundation.layout.RowScope.NavItem(
   icon: ImageVector,
@@ -158,17 +205,24 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
   goTo: (String) -> Unit,
 ) {
   val p = LocalDshmPalette.current
-  NavigationBarItem(
-    selected = current == route,
-    onClick = { goTo(route) },
-    icon = { Icon(icon, null) },
-    label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
-    colors = NavigationBarItemDefaults.colors(
-      selectedIconColor = p.blue,
-      selectedTextColor = p.blue,
-      indicatorColor = p.blueSoft,
-      unselectedIconColor = p.muted,
-      unselectedTextColor = p.muted,
-    ),
-  )
+  val active = current == route
+  val tint = if (active) p.blue else p.muted
+  Column(
+    Modifier
+      .weight(1f)
+      .fillMaxSize()
+      .clickable { goTo(route) },
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center,
+  ) {
+    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+    Spacer(Modifier.height(3.dp))
+    Text(
+      label,
+      fontSize = 11.sp,
+      fontWeight = FontWeight.Medium,
+      color = tint,
+      lineHeight = 13.sp,
+    )
+  }
 }

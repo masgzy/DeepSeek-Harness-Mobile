@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <!-- Compose 应用使用 Material3 Compose 主题，此主题仅作为窗口级基座 -->
+  <!-- Compose 应用使用 Material3 Compose 主题，此主题仅作为窗口级基座。
+       windowBackground 固定为外壳背景色 #f3f5f8：Compose 首帧前不再白闪
+       （深色模式由 values-night 提供同款深色底）。 -->
   <style name="Theme.Dshm" parent="android:Theme.Material.Light.NoActionBar">
     <item name="android:statusBarColor">@android:color/transparent</item>
     <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowBackground">@color/dshm_window_bg</item>
+  </style>
+
+  <!-- dsh Web UI 全屏对话页（HarnessActivity）：深色底，与 dsh 前端默认深色一致；
+       含状态栏与导航栏在内的整窗交给 WebView。 -->
+  <style name="Theme.Dshm.Harness" parent="Theme.Dshm">
+    <item name="android:windowBackground">@color/dshm_harness_bg</item>
+    <item name="android:windowLightStatusBar">false</item>
   </style>
 </resources>

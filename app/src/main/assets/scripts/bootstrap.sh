@@ -56,8 +56,11 @@ log "[2/4] npm 配置 registry: $DSH_NPM_REGISTRY"
 npm config set registry "$DSH_NPM_REGISTRY" --global
 
 log "[3/4] npm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} ..."
-# --no-audit --no-fund 加速；dsh 尚在 developer preview，固定版本保证可复现
-npm install -g --no-audit --no-fund \
+# --no-audit --no-fund 加速；--loglevel=error 只保留错误与结果，
+# 屏蔽 npm 的 deprecation 噪音（如 node-domexception@1.0.0 deprecated，
+# 该警告来自 dsh 的传递依赖，无害且不影响功能）
+# dsh 尚在 developer preview，固定版本保证可复现
+npm install -g --no-audit --no-fund --loglevel=error \
   "@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
 
 DSH_BIN="$(command -v dsh || true)"

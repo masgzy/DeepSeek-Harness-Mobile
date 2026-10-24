@@ -61,16 +61,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     set(value) = prefs.edit().putString("npm_registry", value).apply()
 
   // ---- 引擎控制 ----
-  fun startEngine(onDone: (() -> Unit)? = null) {
+  fun startEngine(onDone: ((ok: Boolean) -> Unit)? = null) {
     viewModelScope.launch(Dispatchers.IO) {
       val ok = engineManager.startEngine(port)
       if (ok) EngineService.start(getApplication())
       var waited = 0
       // 轮询等待 Web UI 就绪（最多 60s）：以「带 token 的 webUrl 解析完成」为就绪标准，
       // 只探测端口会把 401 拒答误判为可用，WebView 随即撞上认证错误页。
+      // 等待期间同步从日志尾部补解析：覆盖 APP 重启后附着到仍在运行引擎的场景
+      // （此时 stdout 管道读者已不在，webUrl 流不会自发更新，不能干等 60s）。
       while (ok && waited < 60_000 && EngineManager.webUrl.value == null) {
         Thread.sleep(1_000)
         waited += 1_000
+        if (waited % 3_000 == 0) resolveWebUrlFromLog()
       }
       // 端口就绪但 URL 始终没打出来（异常场景）：退回端口探测结果，别让按钮悬空。
       if (ok && EngineManager.webUrl.value == null && engineManager.isRunning) {
@@ -79,7 +82,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning} url=${EngineManager.webUrl.value != null}")
-      onDone?.let { withContext(Dispatchers.Main) { it() } }
+      onDone?.let { withContext(Dispatchers.Main) { it(ok) } }
     }
   }
 
