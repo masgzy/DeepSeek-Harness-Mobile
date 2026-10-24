@@ -16,10 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material.icons.outlined.ScrollText
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -47,6 +47,7 @@ import io.github.masgzy.dshm.ui.components.DangerQuietButton
 import io.github.masgzy.dshm.ui.components.InlineAlert
 import io.github.masgzy.dshm.ui.components.SectionCard
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
+import io.github.masgzy.dshm.util.AppLog
 
 /**
  * 设置页：对齐 dphmoblie/deepseek-harness-android 设置首页的分组卡片形态——
@@ -113,7 +114,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
     // —— 日志与排查 ——
     SectionCard("日志与排查") {
       SettingRow(
-        icon = Icons.Outlined.ScrollText,
+        icon = Icons.Outlined.Description,
         title = "引擎与应用日志",
         hint = "引擎 stdout、应用运行日志与崩溃记录",
         value = null,
