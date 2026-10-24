@@ -100,18 +100,36 @@ fun HomeScreen(viewModel: AppViewModel) {
   ) {
     ScreenHeading("Harness 对话", title(running, launching, stopping))
 
-    // launch-panel：52dp 图标块 + 文案 + 分隔线 + 按钮区（.launch-panel 网格形态）
-    Column(
+    // launch-panel：52dp 图标块 + 文案 + 分隔线 + 按钮区
+    // （.launch-panel：135° blue-soft→surface 对角渐变 + 1px 淡蓝外环）
+    val panelShape = RoundedCornerShape(DshmRadius.card.dp)
+    val panelRing = LocalDshmPalette.current.blue.copy(alpha = 0.07f)
+    Box(
       Modifier
         .fillMaxWidth()
-        .background(
-          MaterialTheme.colorScheme.surface,
-          RoundedCornerShape(DshmRadius.card.dp),
-        )
-        .border(1.dp, LocalDshmPalette.current.line, RoundedCornerShape(DshmRadius.card.dp))
-        .padding(20.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+        .border(1.dp, panelRing, panelShape)
+        .padding(1.dp),
     ) {
+      Column(
+        Modifier
+          .fillMaxWidth()
+          .background(
+            androidx.compose.ui.graphics.Brush.linearGradient(
+              colorStops = arrayOf(
+                0f to androidx.compose.ui.graphics.lerp(
+                  LocalDshmPalette.current.blueSoft,
+                  MaterialTheme.colorScheme.surface,
+                  0.35f,
+                ),
+                0.42f to MaterialTheme.colorScheme.surface,
+              ),
+            ),
+            panelShape,
+          )
+          .border(1.dp, LocalDshmPalette.current.line, panelShape)
+          .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+      ) {
       Row(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.Top,
@@ -208,6 +226,7 @@ fun HomeScreen(viewModel: AppViewModel) {
             icon = Icons.Outlined.Square,
           )
         }
+      }
       }
     }
 

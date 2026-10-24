@@ -13,10 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import io.github.masgzy.dshm.ui.components.Segmented
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -74,26 +72,20 @@ fun LogsScreen(viewModel: AppViewModel) {
       .padding(horizontal = 20.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    // 切换器
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-      val tabs = listOf("引擎", "应用", "崩溃")
-      tabs.forEachIndexed { index, label ->
-        SegmentedButton(
-          selected = tab == index,
-          onClick = { tab = index },
-          shape = SegmentedButtonDefaults.itemShape(index = index, count = tabs.size),
-          label = { Text(label, fontSize = 13.sp) },
-        )
-      }
-    }
+    // 切换器（.segmented：surface-muted 底 + 白色选中块 + 小阴影）
+    Segmented(
+      options = listOf("引擎", "应用", "崩溃"),
+      selected = tab,
+      onSelect = { tab = it },
+    )
 
     // 终端面板
     Column(
       Modifier
         .fillMaxWidth()
         .weight(1f)
-        .background(p.terminalBg, RoundedCornerShape(DshmRadius.control.dp))
-        .border(1.dp, p.terminalLine, RoundedCornerShape(DshmRadius.control.dp))
+        .background(p.terminalBg, RoundedCornerShape(DshmRadius.card.dp))
+        .border(1.dp, p.terminalLine, RoundedCornerShape(DshmRadius.card.dp))
         .padding(12.dp),
     ) {
       if (lines.isEmpty()) {

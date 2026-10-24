@@ -44,6 +44,7 @@ import io.github.masgzy.dshm.ui.AppViewModel
 import io.github.masgzy.dshm.ui.components.AppMarkImage
 import io.github.masgzy.dshm.ui.components.DangerQuietButton
 import io.github.masgzy.dshm.ui.components.DetailRow
+import io.github.masgzy.dshm.ui.components.DshmDialog
 import io.github.masgzy.dshm.ui.components.InlineAlert
 import io.github.masgzy.dshm.ui.components.InstallSteps
 import io.github.masgzy.dshm.ui.components.Phases
@@ -105,7 +106,14 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
     Spacer(Modifier.height(if (isOnboarding) 12.dp else 0.dp))
     ScreenHeading("应用管理", "Ubuntu 运行时")
 
-    // runtime-overview 卡片：蓝软渐变底（.runtime-overview）
+    // runtime-overview 卡片：蓝软渐变底 + 1px 淡蓝外环（.runtime-overview）
+    val overviewShape = RoundedCornerShape(DshmRadius.card.dp)
+    Box(
+      Modifier
+        .fillMaxWidth()
+        .border(1.dp, LocalDshmPalette.current.blue.copy(alpha = 0.07f), overviewShape)
+        .padding(1.dp),
+    ) {
     Column(
       Modifier
         .fillMaxWidth()
@@ -118,10 +126,10 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             ),
             1f to MaterialTheme.colorScheme.surface,
           ),
-          RoundedCornerShape(DshmRadius.card.dp),
+          overviewShape,
         )
-        .border(1.dp, LocalDshmPalette.current.line, RoundedCornerShape(DshmRadius.card.dp))
-        .padding(16.dp),
+        .border(1.dp, LocalDshmPalette.current.line, overviewShape)
+        .padding(20.dp),
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
       Row(
@@ -143,8 +151,8 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
         Column(Modifier.weight(1f)) {
           Text(
             "Ubuntu ${Paths.UBUNTU_RELEASE} LTS",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
           )
           Text(
@@ -257,6 +265,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
         }
       }
     }
+    }
 
     // 错误告警条（inline-alert danger）+ 重试
     if (setup.error != null) {
@@ -324,27 +333,19 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
     }
   }
 
-  // 重置确认
+  // 重置确认（底部弹卡）
   if (confirmReset) {
-    androidx.compose.material3.AlertDialog(
-      onDismissRequest = { confirmReset = false },
-      title = { Text("重置运行环境？") },
-      text = {
-        Text(
-          "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
-            "（/root/projects 工作区文件保留）。下次使用需重新安装。",
-        )
-      },
-      confirmButton = {
-        androidx.compose.material3.TextButton(
-          onClick = {
-            confirmReset = false
-            viewModel.uninstallRuntime()
-          },
-        ) { Text("重置") }
-      },
-      dismissButton = {
-        androidx.compose.material3.TextButton(onClick = { confirmReset = false }) { Text("取消") }
+    DshmDialog(
+      onDismiss = { confirmReset = false },
+      title = "重置运行环境？",
+      message = "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
+        "（/root/projects 工作区文件保留）。下次使用需重新安装。",
+      icon = Icons.Outlined.RestoreFromTrash,
+      danger = true,
+      confirmLabel = "重置",
+      onConfirm = {
+        confirmReset = false
+        viewModel.uninstallRuntime()
       },
     )
   }

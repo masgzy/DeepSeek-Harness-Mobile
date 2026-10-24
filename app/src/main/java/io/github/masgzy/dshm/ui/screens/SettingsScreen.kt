@@ -20,14 +20,9 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +41,9 @@ import io.github.masgzy.dshm.ui.AppViewModel
 import io.github.masgzy.dshm.ui.components.DangerQuietButton
 import io.github.masgzy.dshm.ui.components.InlineAlert
 import io.github.masgzy.dshm.ui.components.SectionCard
+import io.github.masgzy.dshm.ui.components.CapsuleSelector
+import io.github.masgzy.dshm.ui.components.DshmDialog
+import io.github.masgzy.dshm.ui.components.DshmInputField
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 import io.github.masgzy.dshm.util.AppLog
 
@@ -88,26 +86,14 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
           fontWeight = FontWeight.Medium,
           color = MaterialTheme.colorScheme.onSurface,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          FilterChip(
-            selected = viewModel.npmRegistry == Paths.NPM_REGISTRY_CN,
-            onClick = { viewModel.npmRegistry = Paths.NPM_REGISTRY_CN },
-            label = { Text("国内镜像") },
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = p.blueSoft,
-              selectedLabelColor = p.blue,
-            ),
-          )
-          FilterChip(
-            selected = viewModel.npmRegistry == Paths.NPM_REGISTRY_OFFICIAL,
-            onClick = { viewModel.npmRegistry = Paths.NPM_REGISTRY_OFFICIAL },
-            label = { Text("官方源") },
-            colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = p.blueSoft,
-              selectedLabelColor = p.blue,
-            ),
-          )
-        }
+        CapsuleSelector(
+          options = listOf("国内镜像", "官方源"),
+          selected = if (viewModel.npmRegistry == Paths.NPM_REGISTRY_CN) 0 else 1,
+          onSelect = { index ->
+            viewModel.npmRegistry =
+              if (index == 0) Paths.NPM_REGISTRY_CN else Paths.NPM_REGISTRY_OFFICIAL
+          },
+        )
       }
     }
 
@@ -172,51 +158,42 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
     Spacer(Modifier.height(8.dp))
   }
 
-  // 端口编辑对话框
+  // 端口编辑（底部弹卡 + sunken 输入框）
   if (editingPort) {
-    AlertDialog(
-      onDismissRequest = { editingPort = false },
-      title = { Text("Web UI 端口") },
-      text = {
-        OutlinedTextField(
-          value = portDraft,
-          onValueChange = { portDraft = it.filter(Char::isDigit).take(5) },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          singleLine = true,
-          label = { Text("端口（1024-65535）") },
-        )
+    DshmDialog(
+      onDismiss = { editingPort = false },
+      title = "Web UI 端口",
+      message = "修改后需重新启动引擎生效（1024-65535）。",
+      confirmLabel = "保存",
+      confirmEnabled = portDraft.toIntOrNull() in 1024..65535,
+      onConfirm = {
+        portDraft.toIntOrNull()?.let { viewModel.port = it }
+        editingPort = false
       },
-      confirmButton = {
-        TextButton(onClick = {
-          portDraft.toIntOrNull()?.let { viewModel.port = it }
-          editingPort = false
-        }) { Text("保存") }
-      },
-      dismissButton = {
-        TextButton(onClick = { editingPort = false }) { Text("取消") }
-      },
-    )
+    ) {
+      DshmInputField(
+        value = portDraft,
+        onValueChange = { portDraft = it.filter(Char::isDigit).take(5) },
+        label = "端口",
+        hint = "1024-65535",
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+      )
+    }
   }
 
-  // 卸载确认
+  // 卸载确认（底部弹卡，危险态）
   if (confirmUninstall) {
-    AlertDialog(
-      onDismissRequest = { confirmUninstall = false },
-      title = { Text("重置运行环境？") },
-      text = {
-        Text(
-          "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
-            "（/root/projects 工作区文件保留）。下次使用需重新安装。",
-        )
-      },
-      confirmButton = {
-        TextButton(onClick = {
-          confirmUninstall = false
-          viewModel.uninstallRuntime()
-        }) { Text("重置") }
-      },
-      dismissButton = {
-        TextButton(onClick = { confirmUninstall = false }) { Text("取消") }
+    DshmDialog(
+      onDismiss = { confirmUninstall = false },
+      title = "重置运行环境？",
+      message = "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
+        "（/root/projects 工作区文件保留）。下次使用需重新安装。",
+      icon = Icons.Outlined.RestoreFromTrash,
+      danger = true,
+      confirmLabel = "重置",
+      onConfirm = {
+        confirmUninstall = false
+        viewModel.uninstallRuntime()
       },
     )
   }
