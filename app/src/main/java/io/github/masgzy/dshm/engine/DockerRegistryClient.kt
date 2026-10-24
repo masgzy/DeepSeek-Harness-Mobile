@@ -1,6 +1,7 @@
 package io.github.masgzy.dshm.engine
 
 import io.github.masgzy.dshm.util.AppLog
+import io.github.masgzy.dshm.util.Downloader
 import io.github.masgzy.dshm.util.TarExtractor
 import java.io.File
 import java.io.IOException
@@ -8,6 +9,9 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 
 /**
@@ -18,8 +22,9 @@ import org.json.JSONObject
  *   2. manifest 请求遇 401 时按 WWW-Authenticate 挑战换取匿名 Bearer token
  *      （token 按 repo 签发，换 repo 必须重新取）；
  *   3. OCI index / Docker manifest-list 解出 arm64/linux 子 manifest；
- *   4. 逐层下载 blob（跨域重定向丢弃 Authorization）→ SHA-256 按_digest_ 校验 →
- *      解包进 rootfs 暂存目录（含 .wh.* whiteout 处理）。
+ *   4. 多层**并行**下载 blob（≤4 并发，跨域重定向丢弃 Authorization）→ SHA-256 按
+ *      _digest_ 校验 → 按序解包进 rootfs 暂存目录（含 .wh.* whiteout 处理）；
+ *      已完整下载且校验通过的层写入缓存，镜像源回退重试时直接复用。
  *
  * 镜像源：Docker Hub 引用默认走国内可达镜像（daocloud / 1panel / 1ms），
  * 全部失败再回退 registry-1.docker.io；自定义第三方 registry 只走其自身。
@@ -176,38 +181,89 @@ class DockerRegistryClient(
       index
     }
 
-    // 2) layers
+    // 2) layers：并行下载（≤4 并发）→ 按序校验 + 解包（whiteout 依赖顺序）
     val layers = manifest.optJSONArray("layers")
       ?: throw IOException("manifest 缺少 layers 字段")
     val totalBytes = (0 until layers.length()).sumOf { layers.getJSONObject(it).optLong("size", 0L) }
-    onLog("共 ${layers.length()} 层，合计 ${fmt(totalBytes)}")
-    var doneBytes = 0L
-    var idx = 0
-    while (idx < layers.length()) {
-      val layer = layers.getJSONObject(idx)
-      val digest = layer.optString("digest").orEmpty()
-      val size = layer.optLong("size", 0L)
-      val media = layer.optString("mediaType", "")
-      if (!digest.startsWith("sha256:")) throw IOException("非法 layer digest: $digest")
+    onLog("共 ${layers.length()} 层，合计 ${fmt(totalBytes)}（并行下载）")
+
+    // 前置校验：digest 合法 + 拒绝 zstd（避免并行下载完才发现不支持）
+    data class LayerSpec(val idx: Int, val digest: String, val size: Long)
+    val specs = (0 until layers.length()).map { i ->
+      val l = layers.getJSONObject(i)
+      val d = l.optString("digest").orEmpty()
+      if (!d.startsWith("sha256:")) throw IOException("非法 layer digest: $d")
+      val media = l.optString("mediaType", "")
       if (media.contains("zstd")) {
         throw IOException("镜像使用 zstd 压缩层（$media），暂不支持；请换用 gzip 层的镜像")
       }
-      onProgress("下载镜像层 ${idx + 1}/${layers.length()}", doneBytes, totalBytes)
-      val blob = session.fetchBlob(digest, size) { d, _ ->
-        onProgress("下载镜像层 ${idx + 1}/${layers.length()}", doneBytes + d, totalBytes)
+      LayerSpec(i, d, l.optLong("size", 0L))
+    }
+
+    // 并行下载到缓存文件（每层独立重试；已下好且校验过的层跨镜像源复用）
+    val blobs = arrayOfNulls<File>(specs.size)
+    val perLayer = specs.map { AtomicLong(0L) }
+    val throttle = longArrayOf(System.currentTimeMillis())
+    fun sumDone(): Long = perLayer.sumOf { it.get() }
+    fun report(force: Boolean, label: String) {
+      val now = System.currentTimeMillis()
+      if (force || now - throttle[0] > 150) {
+        throttle[0] = now
+        onProgress(label, sumDone(), totalBytes)
       }
-      // digest 校验
+    }
+    val pool = Executors.newFixedThreadPool(minOf(4, specs.size))
+    try {
+      val futures = specs.map { spec ->
+        pool.submit(Callable {
+          var attempt = 0
+          while (true) {
+            try {
+              session.cachedBlob(spec.digest)?.let { cached ->
+                perLayer[spec.idx].set(spec.size)
+                blobs[spec.idx] = cached
+                report(true, "镜像层缓存命中 ${spec.idx + 1}/${specs.size}")
+                return@Callable
+              }
+              val blob = session.fetchBlob(spec.digest, spec.size) { d, _ ->
+                perLayer[spec.idx].set(d)
+                report(false, "并行下载镜像层 ${spec.idx + 1}/${specs.size}")
+              }
+              blobs[spec.idx] = blob
+              return@Callable
+            } catch (e: Exception) {
+              attempt++
+              if (attempt >= 2) {
+                throw IOException("层 ${spec.idx + 1}/${specs.size} 下载失败: ${e.message}", e)
+              }
+              perLayer[spec.idx].set(0L) // 重试重置该层进度
+            }
+          }
+          @Suppress("UNREACHABLE_CODE") Unit
+        })
+      }
+      // 逐个 join：任一层失败抛出 → 整个镜像源失败 → pull() 换源重试（已下好的层进缓存）
+      futures.forEach { it.get() }
+    } finally {
+      pool.shutdownNow()
+    }
+
+    // 按序校验 + 解包
+    var doneBytes = 0L
+    specs.forEachIndexed { i, spec ->
+      val blob = blobs[i] ?: throw IOException("层 ${i + 1} 未下载")
       val actual = HashingUtil.sha256Hex(blob)
-      if (actual != digest.removePrefix("sha256:")) {
-        throw IOException("layer SHA-256 不匹配: $digest 实际=$actual")
+        ?: throw IOException("SHA-256 计算失败: ${blob.name}")
+      if (actual != spec.digest.removePrefix("sha256:")) {
+        throw IOException("layer SHA-256 不匹配: ${spec.digest} 实际=$actual")
       }
-      onProgress("解包镜像层 ${idx + 1}/${layers.length()}", doneBytes, totalBytes)
+      onProgress("解包镜像层 ${i + 1}/${specs.size}", doneBytes, totalBytes)
       blob.inputStream().buffered().use { input ->
         TarExtractor.extractLayer(input, stagingDir)
       }
-      doneBytes += size
+      doneBytes += spec.size
       blob.delete()
-      idx++
+      onProgress("解包镜像层 ${i + 1}/${specs.size}", doneBytes, totalBytes)
     }
     onProgress("镜像就绪", 1, 1)
   }
@@ -266,6 +322,14 @@ class DockerRegistryClient(
       }
       if (resp.code !in 200..299) throw IOException("HTTP ${resp.code}: ${ref.repo} $path")
       return resp.body ?: throw IOException("空响应体: $path")
+    }
+
+    /** 缓存命中：已有完整下载且 SHA-256 校验通过的层文件则复用（换镜像源重试时避免重下）。 */
+    fun cachedBlob(digest: String): File? {
+      val f = File(cacheDir, "layer-${digest.removePrefix("sha256:").take(16)}.bin")
+      if (!f.isFile || f.length() == 0L) return null
+      val actual = HashingUtil.sha256Hex(f) ?: return null
+      return if (actual == digest.removePrefix("sha256:")) f else null
     }
 
     fun fetchBlob(digest: String, size: Long, onRead: (Long, Long) -> Unit): File {
@@ -345,9 +409,9 @@ class DockerRegistryClient(
     ): Resp {
       val conn = URL(url).openConnection() as HttpURLConnection
       conn.connectTimeout = 15_000
-      conn.readTimeout = 30_000
+      conn.readTimeout = 60_000
       conn.instanceFollowRedirects = false
-      conn.setRequestProperty("User-Agent", "DeepSeek-Harness-Mobile/1.0 (Android)")
+      conn.setRequestProperty("User-Agent", Downloader.UA)
       conn.setRequestProperty("Accept", accept)
       if (handleAuth) token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
       try {

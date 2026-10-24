@@ -10,10 +10,12 @@ import java.io.IOException
 /**
  * rootfs 获取器（发行版感知）：
  *
- *  1. cdimage 直线路径：发行方 base tar.gz（Ubuntu 26.04 ubuntu-base，官方 cdimage +
- *     清华 TUNA 双镜像，SHA-256 锁定）——体积最小、无需 registry 协议；
- *  2. registry 路径：任意 Docker 引用经 [DockerRegistryClient] 拉取
- *     （manifest → arm64 子清单 → 逐层下载/校验/解包），国内镜像源自动回退。
+ *  1. cdimage 直线路径：发行方 base tar.gz（Ubuntu ubuntu-base / Alpine minirootfs，
+ *     官方 + 国内多镜像，SHA-256 锁定）——体积最小、无需 registry 协议；
+ *  2. lxc-images 直线路径：Debian 专用，simplestreams 动态解析最新构建
+ *     （TUNA/USTC/官方多镜像，索引内 SHA-256 校验）；
+ *  3. registry 路径：任意 Docker 引用经 [DockerRegistryClient] 并行拉取
+ *     （manifest → arm64 子清单 → 多层并发下载/校验/解包），国内镜像源自动回退。
  *
  * 统一产出：rootfs 暂存目录解包完成 → 原子改名启用（老 rootfs 备份后删除）。
  */
@@ -41,17 +43,27 @@ class RootfsManager(private val filesDir: File) {
     staging.mkdirs()
 
     when {
-      // ① cdimage 直链优先（Ubuntu 26.04），失败回退 registry
+      // ① cdimage 直链优先（Ubuntu / Alpine），失败回退 registry
       distro.cdimage != null -> {
         val ok = runCatching { installCdimage(distro, staging, onProgress) }
-          .onFailure { AppLog.log("rootfs", "cdimage 路径失败，回退 registry: ${distro.imageRef}", it) }
+          .onFailure { AppLog.log("rootfs", "cdimage 路径失败，回退 registry: ${distro.fallbackImageRef}", it) }
           .isSuccess
         if (!ok) {
-          onLog("cdimage 直链不可用，改从 Docker registry 拉取 ${distro.fallbackImageRef()}")
-          pullRegistry(distro.fallbackImageRef(), staging, distro.arch, onProgress, onLog)
+          onLog("直链不可用，改从 Docker registry 拉取 ${distro.fallbackImageRef}")
+          pullRegistry(distro.fallbackImageRef, staging, distro.arch, onProgress, onLog)
         }
       }
-      // ② 仅 registry 路径
+      // ② lxc-images 直链（Debian），失败回退 registry
+      distro.lxc != null -> {
+        val ok = runCatching { installLxcImages(distro, staging, onProgress, onLog) }
+          .onFailure { AppLog.log("rootfs", "lxc-images 路径失败，回退 registry: ${distro.fallbackImageRef}", it) }
+          .isSuccess
+        if (!ok) {
+          onLog("lxc-images 直链不可用，改从 Docker registry 拉取 ${distro.fallbackImageRef}")
+          pullRegistry(distro.fallbackImageRef, staging, distro.arch, onProgress, onLog)
+        }
+      }
+      // ③ 仅 registry 路径
       else -> pullRegistry(distro.imageRef, staging, distro.arch, onProgress, onLog)
     }
 
@@ -68,8 +80,6 @@ class RootfsManager(private val filesDir: File) {
     onProgress("rootfs 就绪", 1, 1)
     return true
   }
-
-  private fun Distro.fallbackImageRef(): String = cdimage?.fallbackRef ?: imageRef
 
   /** cdimage 直链路径：下载 tar.gz → SHA-256 校验 → 解包到 staging。 */
   private fun installCdimage(
@@ -90,6 +100,34 @@ class RootfsManager(private val filesDir: File) {
     onProgress("解压 rootfs", 0, 1)
     val ok = TarExtractor.extract(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
     AppLog.log("rootfs", "cdimage staging 解压 ok=$ok entries=${staging.listFiles()?.size ?: 0}")
+    if (!ok) {
+      staging.deleteRecursively()
+      throw IOException("rootfs 解压失败")
+    }
+  }
+
+  /** lxc-images 直链路径：simplestreams 解析 → 多镜像下载 → 索引内 SHA-256 校验 → 解包。 */
+  private fun installLxcImages(
+    distro: Distro,
+    staging: File,
+    onProgress: (step: String, done: Long, total: Long) -> Unit,
+    onLog: (String) -> Unit,
+  ) {
+    val ref = requireNotNull(distro.lxc) { "distro 无 lxc 引用" }
+    onProgress("解析 ${distro.label} 镜像索引", 0, 1)
+    val resolved = LxcImages.resolve(LxcImages.Ref(ref.suite, ref.fallbackRef))
+    onLog(
+      "lxc-images: ${ref.suite} build ${resolved.buildId}（" +
+        "${resolved.size / (1024 * 1024)}MB，8 段并行下载）",
+    )
+    val archive = File(cacheDir, "lxc-${ref.suite}-rootfs.tar.xz")
+    onProgress("下载 ${distro.label} rootfs", 0, resolved.size)
+    Downloader.download(resolved.urls, archive, resolved.sha256) { done, total ->
+      onProgress("下载 ${distro.label} rootfs", done, total)
+    }
+    onProgress("解压 rootfs", 0, 1)
+    val ok = TarExtractor.extract(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
+    AppLog.log("rootfs", "lxc-images staging 解压 ok=$ok entries=${staging.listFiles()?.size ?: 0}")
     if (!ok) {
       staging.deleteRecursively()
       throw IOException("rootfs 解压失败")

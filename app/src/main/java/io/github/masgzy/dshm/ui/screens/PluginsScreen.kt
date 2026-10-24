@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -53,9 +54,11 @@ import kotlinx.coroutines.withContext
  *
  * 列表读取 profile 的 package.json（宿主侧直读，无需引擎）；安装/移除/更新在
  * proot 内执行 pnpm（要求引擎停止）。操作输出流式展示，便于失败排查。
+ *
+ * 展示模式：底部导航 Tab（无返回键，[onBack] 传 null）或设置页子页（带返回键）。
  */
 @Composable
-fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
+fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
   val p = LocalDshmPalette.current
   val scope = rememberCoroutineScope()
   var catalog by remember { mutableStateOf(viewModel.pluginManager.catalog()) }
@@ -113,15 +116,19 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
       .padding(bottom = 24.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
-    // 顶栏（子页返回）
+    // 顶栏：Tab 模式仅标题；子页模式带返回键
     Row(
       Modifier
         .fillMaxWidth()
         .padding(top = 14.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      IconButton(onClick = onBack) {
-        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MaterialTheme.colorScheme.onSurface)
+      if (onBack != null) {
+        IconButton(onClick = onBack) {
+          Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MaterialTheme.colorScheme.onSurface)
+        }
+      } else {
+        Spacer(Modifier.width(12.dp))
       }
       Text(
         "插件管理",

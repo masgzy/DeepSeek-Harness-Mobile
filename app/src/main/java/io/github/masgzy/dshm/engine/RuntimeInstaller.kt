@@ -29,6 +29,8 @@ class RuntimeInstaller(private val context: Context) {
    * @param npmRegistry npm 源（默认 npmmirror 国内加速）。
    * @param nodeVersion Node.js 版本（"v24.22.0"；Alpine 族忽略，用 apk 版本）。
    * @param dshVersion @deepseek-ai/dsh 版本；空串 = npm latest。
+   * @param aptMirror apt 镜像站基址（镜像测速择优；空 = 不切换）。
+   * @param alpineMirror apk 镜像基址（镜像测速择优；空 = 用默认 TUNA）。
    * @throws Exception 任何一步失败。
    */
   fun install(
@@ -36,6 +38,8 @@ class RuntimeInstaller(private val context: Context) {
     npmRegistry: String,
     nodeVersion: String,
     dshVersion: String,
+    aptMirror: String,
+    alpineMirror: String,
     onProgress: (step: String, done: Long, total: Long) -> Unit,
     onLog: (String) -> Unit,
   ) {
@@ -93,11 +97,12 @@ class RuntimeInstaller(private val context: Context) {
       add("DSHM_DISTRO_ID=${distro.id}")
       add("DSHM_FAMILY=${distro.family.name.lowercase()}")
       if (distro.family == DistroFamily.ALPINE) {
-        add("ALPINE_MIRROR=${if (isCn) Paths.ALPINE_MIRROR_CN else Paths.ALPINE_MIRROR_OFFICIAL}")
+        add("ALPINE_MIRROR=${alpineMirror.ifBlank { Paths.ALPINE_MIRROR_CN }}")
       } else {
         add("NODE_SHA256=$nodeSha256")
-        // 国内源时顺带换 apt 源（best-effort，失败不影响安装）
-        if (isCn) add("DSHM_APT_MIRROR=${Paths.APT_MIRROR_CN}")
+        // apt 镜像：测速择优结果优先；未测速时国内 npm 源顺带换 TUNA（best-effort）
+        val apt = aptMirror.ifBlank { if (isCn) Paths.APT_MIRROR_CN else "" }
+        if (apt.isNotBlank()) add("DSHM_APT_MIRROR=$apt")
       }
     }
     // Alpine 首轮用 busybox sh（bash 由 bootstrap 装好后再重入）
@@ -159,5 +164,35 @@ class RuntimeInstaller(private val context: Context) {
       }
     }.apply { isDaemon = true }.start()
     return process.waitFor()
+  }
+
+  /**
+   * 把镜像测速择优的源写入已安装容器（/etc/apt、/etc/apk）。
+   * 容器未就绪 / 运行器缺失时静默返回；镜像选择为空时不做任何修改。
+   */
+  fun applyMirrors(aptMirror: String, alpineMirror: String, onLog: (String) -> Unit) {
+    val rootfsDir = Paths.rootfs(context.filesDir)
+    if (!Paths.rootfsUsable(rootfsDir)) return
+    if (!prootRuntime.runnerAvailable()) return
+    val envPairs = buildList {
+      if (aptMirror.isNotBlank()) add("DSHM_APT_MIRROR=$aptMirror")
+      if (alpineMirror.isNotBlank()) add("ALPINE_MIRROR=$alpineMirror")
+    }
+    if (envPairs.isEmpty()) return
+    val scriptDir = File(context.filesDir, "dshm")
+    scriptDir.mkdirs()
+    val script = File(scriptDir, "mirror-apply.sh")
+    context.assets.open("scripts/mirror-apply.sh").use { input ->
+      script.outputStream().use { out -> input.copyTo(out) }
+    }
+    script.setExecutable(true, true)
+    val argv = prootRuntime.buildArgs(
+      rootfsDir,
+      listOf(script.absolutePath + ":/dshm/mirror-apply.sh"),
+      envPairs,
+      listOf("/bin/sh", "/dshm/mirror-apply.sh"),
+    )
+    val exit = runProot(argv, onLog)
+    AppLog.log("mirror", "镜像源应用完成 exit=$exit")
   }
 }

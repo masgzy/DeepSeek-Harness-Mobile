@@ -242,7 +242,7 @@ fun HomeScreen(viewModel: AppViewModel) {
     if (openFailed) {
       InlineAlert(
         title = "无法启动对话",
-        message = "引擎启动失败或运行组件缺失，请到「环境」页查看运行时状态与安装日志。",
+        message = "引擎启动失败或运行组件缺失，请到「设置 → 运行环境」查看运行时状态，安装日志见安装引导页。",
         danger = true,
       )
     }

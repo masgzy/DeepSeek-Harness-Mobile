@@ -132,6 +132,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | AndroidX / Jetpack Compose / Material 3 / Material Icons | `Copyright The Android Open Source Project` |
 | Kotlin 标准库（kotlin-stdlib） | `Copyright 2000-2026 JetBrains s.r.o.` |
 | Apache Commons Compress | `Copyright The Apache Software Foundation` |
+| Termux terminal-emulator / terminal-view / libtermux JNI（`com.termux.terminal`、`com.termux.view`、`app/src/main/cpp/termux.c`，容器终端 UI 内核；未修改逻辑，仅调整 R 引用与集成打包） | `Copyright (C) 2018 The Android Open Source Project` 等 Termux AUTHORS（见 termux-app 仓库） |
 | Gradle Wrapper（gradle-wrapper） | `Copyright Gradle Inc.` / `Copyright 2010-2026 Gradle contributors` |
 
 ### 3.2 Android NOTICE 内容（Apache License 2.0 第 4(d) 条要求的归属声明）

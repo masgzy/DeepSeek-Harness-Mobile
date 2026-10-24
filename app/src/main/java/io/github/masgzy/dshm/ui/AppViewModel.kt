@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.masgzy.dshm.engine.Distro
 import io.github.masgzy.dshm.engine.DistroCatalog
+import io.github.masgzy.dshm.engine.DistroFamily
 import io.github.masgzy.dshm.engine.DshCatalog
 import io.github.masgzy.dshm.engine.EngineManager
 import io.github.masgzy.dshm.engine.EngineService
@@ -18,6 +19,7 @@ import io.github.masgzy.dshm.engine.RootfsManager
 import io.github.masgzy.dshm.engine.RuntimeInstaller
 import io.github.masgzy.dshm.engine.UpdateManager
 import io.github.masgzy.dshm.util.AppLog
+import io.github.masgzy.dshm.util.MirrorProbe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +34,17 @@ data class SetupState(
   val logLines: List<String> = emptyList(),
   val error: String? = null,
   val done: Boolean = false,
+)
+
+/** 镜像源测速状态（apt / apk 两组结果，随测速逐个填充）。 */
+data class MirrorProbeState(
+  val running: Boolean = false,
+  val apt: List<MirrorProbe.Result> = emptyList(),
+  val apk: List<MirrorProbe.Result> = emptyList(),
+  val done: Boolean = false,
+  /** 已把择优结果写入已安装容器（rootfs 就绪时自动执行）。 */
+  val applied: Boolean = false,
+  val error: String? = null,
 )
 
 /**
@@ -71,6 +84,84 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   var npmRegistry: String
     get() = prefs.getString("npm_registry", Paths.NPM_REGISTRY_CN) ?: Paths.NPM_REGISTRY_CN
     set(value) = prefs.edit().putString("npm_registry", value).apply()
+
+  // ---- 镜像源测速择优（apt / apk） ----
+  /** apt 镜像站基址（scheme://host；空 = 未测速，安装时按 npm 源推断）。 */
+  var aptMirror: String
+    get() = prefs.getString("apt_mirror", "") ?: ""
+    set(value) = prefs.edit().putString("apt_mirror", value).apply()
+
+  /** apk 镜像基址（scheme://host/alpine；空 = 未测速，用默认 TUNA）。 */
+  var apkMirror: String
+    get() = prefs.getString("apk_mirror", "") ?: ""
+    set(value) = prefs.edit().putString("apk_mirror", value).apply()
+
+  private val _mirrorProbe = MutableStateFlow(MirrorProbeState())
+  val mirrorProbe: StateFlow<MirrorProbeState> = _mirrorProbe
+
+  /** 并行测速 apt/apk 镜像源，自动择优持久化；容器已安装时即时写入。 */
+  fun probeMirrors() {
+    if (_mirrorProbe.value.running) return
+    val distro = this.distro
+    viewModelScope.launch(Dispatchers.IO) {
+      _mirrorProbe.value = MirrorProbeState(running = true)
+      try {
+        var aptResults: List<MirrorProbe.Result> = emptyList()
+        var apkResults: List<MirrorProbe.Result> = emptyList()
+        // apt 候选按所选发行版套件探测（自定义镜像无已知套件，跳过）
+        val suite = when (distro.id) {
+          "ubuntu26" -> "resolute"
+          "ubuntu24" -> "noble"
+          "debian13" -> "trixie"
+          "debian12" -> "bookworm"
+          else -> ""
+        }
+        if (suite.isNotEmpty()) {
+          val mirrors =
+            if (distro.id.startsWith("ubuntu")) MirrorProbe.ubuntuMirrors(suite)
+            else MirrorProbe.debianMirrors(suite)
+          aptResults = MirrorProbe.probe(mirrors) { r ->
+            val cur = _mirrorProbe.value
+            _mirrorProbe.value = cur.copy(apt = mergeProbe(cur.apt, r))
+          }
+        }
+        if (distro.family == DistroFamily.ALPINE) {
+          val branch = distro.cdimage?.release ?: "3.22"
+          apkResults = MirrorProbe.probe(MirrorProbe.alpineMirrors(branch)) { r ->
+            val cur = _mirrorProbe.value
+            _mirrorProbe.value = cur.copy(apk = mergeProbe(cur.apk, r))
+          }
+        }
+        // 择优持久化（首个可用 = 延迟最低）
+        aptResults.firstOrNull { it.latencyMs != null }?.let { aptMirror = it.mirror.applyBase }
+        apkResults.firstOrNull { it.latencyMs != null }?.let { apkMirror = it.mirror.applyBase }
+        AppLog.log("mirror", "镜像测速完成 apt=${aptMirror.ifBlank { "-" }} apk=${apkMirror.ifBlank { "-" }}")
+        _mirrorProbe.value = MirrorProbeState(
+          apt = aptResults.sortedWith(compareBy { it.latencyMs ?: Long.MAX_VALUE }),
+          apk = apkResults.sortedWith(compareBy { it.latencyMs ?: Long.MAX_VALUE }),
+          done = true,
+        )
+        // 容器已装：即时把择优源写入（免重装）
+        if (rootfsManager.isRootfsReady && (aptMirror.isNotBlank() || apkMirror.isNotBlank())) {
+          appendLog("[mirror] 择优完成：apt=${aptMirror.ifBlank { "保持不变" }} apk=${apkMirror.ifBlank { "保持不变" }}，写入容器…")
+          runtimeInstaller.applyMirrors(aptMirror, apkMirror) { appendLog(it) }
+          _mirrorProbe.value = _mirrorProbe.value.copy(applied = true)
+        }
+      } catch (t: Throwable) {
+        AppLog.log("mirror", "镜像测速失败", t)
+        _mirrorProbe.value = _mirrorProbe.value.copy(running = false, error = describe(t))
+      }
+    }
+  }
+
+  /** 测速结果按镜像去重合入（同一镜像取更快的一次）。 */
+  private fun mergeProbe(
+    existing: List<MirrorProbe.Result>,
+    r: MirrorProbe.Result,
+  ): List<MirrorProbe.Result> {
+    val others = existing.filter { it.mirror.applyBase != r.mirror.applyBase }
+    return (others + r).sortedWith(compareBy { it.latencyMs ?: Long.MAX_VALUE })
+  }
 
   // ---- 容器系统与运行时版本选择 ----
   /** 容器系统 ID（DistroCatalog）或 DistroCatalog.CUSTOM_ID。 */
@@ -153,6 +244,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch(Dispatchers.IO) {
       EngineService.stop(getApplication())
       engineManager.stopEngine()
+      io.github.masgzy.dshm.terminal.TerminalHolder.close()
       rootfsManager.uninstall()
       EngineManager.webUrl.value = null
       _setup.value = SetupState()
@@ -208,6 +300,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
           npmRegistry = npmRegistry,
           nodeVersion = nodeVersion,
           dshVersion = dshVersion,
+          aptMirror = aptMirror,
+          alpineMirror = apkMirror,
           onProgress = { step, done, total -> updateProgress(step, done, total) },
           onLog = { line -> appendLog(line) },
         )

@@ -24,8 +24,8 @@
 #   DSHM_DISTRO_ID   容器系统 ID（写入标记，如 debian13 / alpine3 / custom）
 #   DSHM_FAMILY      glibc | alpine
 #   NODE_SHA256      Node tarball 期望 SHA-256（GLIBC 路径，校验完整性）
-#   ALPINE_MIRROR    Alpine apk 镜像源（alpine 路径）
-#   DSHM_APT_MIRROR  apt 镜像源（可选，best-effort 切换）
+#   ALPINE_MIRROR    Alpine apk 镜像源（alpine 路径；宿主测速择优或默认 TUNA）
+#   DSHM_APT_MIRROR  apt 镜像站基址（scheme://host，宿主测速择优；空 = 不切换）
 # =====================================================================
 set -eu
 
@@ -71,18 +71,30 @@ if [ "$DSHM_FAMILY" = "alpine" ]; then
 fi
 
 # ---- 0.5 apt 镜像切换（可选，best-effort；失败不阻断安装） ----
+# DSHM_APT_MIRROR 为镜像站基址（scheme://host，由宿主测速择优），
+# 对 archive.ubuntu.com / security.ubuntu.com / deb.debian.org / security.debian.org
+# 全量替换到该基址下的同路径（/ubuntu、/debian、/debian-security）。
 if [ -n "${DSHM_APT_MIRROR:-}" ] && command -v sed >/dev/null 2>&1; then
   log "[apt] 切换 apt 镜像源 → $DSHM_APT_MIRROR（best-effort）"
+  M="$DSHM_APT_MIRROR"
   for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/debian.sources; do
     if [ -f "$f" ]; then
-      sed -i "s#http://archive.ubuntu.com/ubuntu#https://mirrors.tuna.tsinghua.edu.cn/ubuntu#g; \
-              s#http://security.ubuntu.com/ubuntu#https://mirrors.tuna.tsinghua.edu.cn/ubuntu#g; \
-              s#http://deb.debian.org/debian#https://mirrors.tuna.tsinghua.edu.cn/debian#g; \
-              s#http://security.debian.org/debian-security#https://mirrors.tuna.tsinghua.edu.cn/debian-security#g" "$f" 2>/dev/null || true
+      sed -i "s#http://archive.ubuntu.com/ubuntu#$M/ubuntu#g; \
+              s#https://archive.ubuntu.com/ubuntu#$M/ubuntu#g; \
+              s#http://security.ubuntu.com/ubuntu#$M/ubuntu#g; \
+              s#https://security.ubuntu.com/ubuntu#$M/ubuntu#g; \
+              s#http://deb.debian.org/debian#$M/debian#g; \
+              s#https://deb.debian.org/debian#$M/debian#g; \
+              s#http://security.debian.org/debian-security#$M/debian-security#g; \
+              s#https://security.debian.org/debian-security#$M/debian-security#g" "$f" 2>/dev/null || true
     fi
   done
-  [ -f /etc/apt/sources.list ] && sed -i "s#http://archive.ubuntu.com#https://mirrors.tuna.tsinghua.edu.cn#g; \
-              s#http://deb.debian.org#https://mirrors.tuna.tsinghua.edu.cn#g" /etc/apt/sources.list 2>/dev/null || true
+  [ -f /etc/apt/sources.list ] && sed -i "s#http://archive.ubuntu.com#$M#g; \
+              s#https://archive.ubuntu.com#$M#g; \
+              s#http://deb.debian.org#$M#g; \
+              s#https://deb.debian.org#$M#g; \
+              s#http://security.ubuntu.com#$M#g; \
+              s#http://security.debian.org#$M#g" /etc/apt/sources.list 2>/dev/null || true
 fi
 
 # ---- GLIBC 路径：解压 Node.js tarball 到 /usr/local ----
@@ -105,30 +117,24 @@ else
   NODE_VER="$(node --version)"
 fi
 
-# ---- 2. npm 全局安装 @deepseek-ai/dsh ----
+# ---- 2. npm 全局安装 @deepseek-ai/dsh + pnpm（单次 resolve 提速） ----
 log "[2/4] npm 配置 registry: $DSH_NPM_REGISTRY"
 npm config set registry "$DSH_NPM_REGISTRY" --global
 
-log "[3/4] npm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} ..."
+# dsh 与 pnpm（插件管理依赖）合并为一次 npm install：省去第二次依赖解析/元数据
+# 拉取（npmmirror 上两次安装大约可省 30-50% 耗时）
+log "[3/4] npm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} + pnpm ..."
 # --no-audit --no-fund 加速；--loglevel=error 只保留错误与结果，
 # 屏蔽 npm 的 deprecation 噪音（如 node-domexception@1.0.0 deprecated，
 # 该警告来自 dsh 的传递依赖，无害且不影响功能）
 npm install -g --no-audit --no-fund --loglevel=error \
-  "@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
+  "@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}" pnpm
 
 DSH_BIN="$(command -v dsh || true)"
 [ -n "$DSH_BIN" ] || fail "dsh 未找到（npm 全局安装失败？）"
 log "  dsh 位于: $DSH_BIN"
 dsh --version || true
-
-# ---- 2.5 全局安装 pnpm（dsh plugin 插件管理的依赖） ----
-log "[2.5/4] npm install -g pnpm（插件管理依赖）..."
-if command -v pnpm >/dev/null 2>&1; then
-  log "  pnpm 已存在，跳过"
-else
-  npm install -g --no-audit --no-fund --loglevel=error pnpm
-  command -v pnpm >/dev/null 2>&1 || fail "pnpm 安装失败"
-fi
+command -v pnpm >/dev/null 2>&1 || fail "pnpm 安装失败"
 pnpm --version || true
 
 # ---- 3.（可选）apt 源已按需切换，供用户后续容器 shell 使用 ----

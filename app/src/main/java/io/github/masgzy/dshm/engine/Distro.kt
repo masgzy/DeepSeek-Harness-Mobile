@@ -3,10 +3,11 @@ package io.github.masgzy.dshm.engine
 /**
  * 容器系统目录：内置五种发行版 + 自定义 Docker 镜像。
  *
- * 每种发行版声明两条获取路径：
- *  - [cdimage]：发行方直链 tar.gz（如 Ubuntu 官方 ubuntu-base），带锁定 SHA-256，优先；
- *  - [imageRef]：Docker Registry v2 引用（经 [DockerRegistryClient] 拉取，
- *    逐层 digest 校验），作为兜底或唯一路径。
+ * 内置项全部「URL 直链优先」，失败回退 Docker Registry（经 [DockerRegistryClient]）：
+ *  - Ubuntu 26.04/24.04：发行方 ubuntu-base tar.gz（cdimage 官方 + TUNA），SHA-256 锁定；
+ *  - Alpine：官方 minirootfs（dl-cdn + TUNA/USTC/aliyun），SHA-256 锁定；
+ *  - Debian：官方无 base tarball，走 LXC 镜像源（[LxcImages] 动态解析最新构建，
+ *    TUNA/USTC/官方多镜像，索引内 SHA-256 校验）。
  *
  * family 决定容器内 bootstrap 策略：
  *  - GLIBC（Debian/Ubuntu/大多数自定义镜像）：宿主下载 Node 官方 glibc tarball 注入；
@@ -25,6 +26,13 @@ data class CdimageRef(
   val fallbackRef: String,
 )
 
+/** LXC 镜像源直链（Debian 用，构建号动态解析，索引内 SHA-256 校验）。 */
+data class LxcRef(
+  val suite: String,
+  /** 解析失败时回退的 Docker 引用。 */
+  val fallbackRef: String,
+)
+
 data class Distro(
   /** 稳定 ID（SharedPreferences 存储，勿改）。 */
   val id: String,
@@ -33,13 +41,18 @@ data class Distro(
   /** 副标题（代号 / 大小提示）。 */
   val detail: String,
   val family: DistroFamily,
-  /** Docker Registry 引用（"debian:13"）；cdimage 优先的发行版可为非空兜底。 */
+  /** Docker Registry 引用（"debian:13"）；直链优先的发行版作兜底。 */
   val imageRef: String,
-  /** cdimage 直链；null = 仅走 registry。 */
+  /** cdimage 固定直链；null = 无固定直链。 */
   val cdimage: CdimageRef? = null,
+  /** lxc-images 动态直链（Debian）；null = 不走该路径。 */
+  val lxc: LxcRef? = null,
   /** 架构（当前仅 arm64）。 */
   val arch: String = "arm64",
 ) {
+  /** 直链失败时回退的 Docker 引用。 */
+  val fallbackImageRef: String get() = cdimage?.fallbackRef ?: lxc?.fallbackRef ?: imageRef
+
   /** 对外展示的完整描述（环境详情 / 设置页）。 */
   val display: String get() = if (detail.isBlank()) label else "$label · $detail"
 }
@@ -59,6 +72,32 @@ object DistroCatalog {
     fallbackRef = "ubuntu:26.04",
   )
 
+  /** Ubuntu 24.04 LTS (Noble) ubuntu-base 直链（2026-10 验证）。 */
+  private val UBUNTU24_CDIMAGE = CdimageRef(
+    release = "24.04",
+    fileName = "ubuntu-base-24.04.5-base-arm64.tar.gz",
+    sha256 = "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
+    mirrors = listOf(
+      "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
+      "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
+    ),
+    fallbackRef = "ubuntu:24.04",
+  )
+
+  /** Alpine 3.22 官方 minirootfs 直链（2026-10 验证，dl-cdn + 国内三镜像）。 */
+  private val ALPINE3_CDIMAGE = CdimageRef(
+    release = "3.22",
+    fileName = "alpine-minirootfs-3.22.7-aarch64.tar.gz",
+    sha256 = "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623",
+    mirrors = listOf(
+      "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+      "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+      "https://mirrors.ustc.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+      "https://mirrors.aliyun.com/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+    ),
+    fallbackRef = "alpine:3.22",
+  )
+
   const val CUSTOM_ID = "custom"
 
   /** 五个内置项 + 自定义，顺序即 UI 展示顺序。 */
@@ -69,6 +108,7 @@ object DistroCatalog {
       detail = "trixie",
       family = DistroFamily.GLIBC,
       imageRef = "debian:13",
+      lxc = LxcRef(suite = "trixie", fallbackRef = "debian:13"),
     ),
     Distro(
       id = "debian12",
@@ -76,6 +116,7 @@ object DistroCatalog {
       detail = "bookworm",
       family = DistroFamily.GLIBC,
       imageRef = "debian:12",
+      lxc = LxcRef(suite = "bookworm", fallbackRef = "debian:12"),
     ),
     Distro(
       id = "ubuntu26",
@@ -91,6 +132,7 @@ object DistroCatalog {
       detail = "noble",
       family = DistroFamily.GLIBC,
       imageRef = "ubuntu:24.04",
+      cdimage = UBUNTU24_CDIMAGE,
     ),
     Distro(
       id = "alpine3",
@@ -98,6 +140,7 @@ object DistroCatalog {
       detail = "musl · 极小体积",
       family = DistroFamily.ALPINE,
       imageRef = "alpine:3.22",
+      cdimage = ALPINE3_CDIMAGE,
     ),
   )
 
