@@ -50,11 +50,13 @@ class EngineManager(private val context: Context) {
         val size = logFile.length()
         val start = if (size > 65_536) size - 65_536 else 0L
         java.io.RandomAccessFile(logFile, "r").use { raf ->
-          raf.seek(start)
-          val text = raf.readText()
-          (WEB_URL_REGEX.findAll(text).lastOrNull()?.groupValues?.get(1))
-            ?: TOKEN_URL_REGEX.findAll(text).lastOrNull()?.value
-        }
+        raf.seek(start)
+        val bytes = ByteArray((size - start).toInt())
+        raf.readFully(bytes)
+        val text = String(bytes, Charsets.UTF_8)
+        (WEB_URL_REGEX.findAll(text).lastOrNull()?.groupValues?.get(1))
+          ?: TOKEN_URL_REGEX.findAll(text).lastOrNull()?.value
+      }
       } catch (t: Throwable) {
         AppLog.log("engine", "从日志解析 webUrl 失败", t)
         null
@@ -119,7 +121,7 @@ class EngineManager(private val context: Context) {
       current = process
       // 管道逐行读取：落盘 engine.log + 解析带 token 的 webUrl。
       // dsh web 启动后 1-3 秒内即打印 URL；进程退出后 readLine 返回 null，线程自然结束。
-      thread(daemon = true, name = "dsh-log") {
+      thread(isDaemon = true, name = "dsh-log") {
         try {
           process.inputStream.bufferedReader(Charsets.UTF_8).useLines { lines ->
             lines.forEach { line ->
