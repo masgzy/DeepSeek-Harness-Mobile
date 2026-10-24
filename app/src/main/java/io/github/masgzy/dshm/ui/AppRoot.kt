@@ -1,7 +1,9 @@
 package io.github.masgzy.dshm.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
@@ -22,14 +23,16 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -50,11 +53,13 @@ import io.github.masgzy.dshm.ui.screens.LogsScreen
 import io.github.masgzy.dshm.ui.screens.SettingsScreen
 import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
+import io.github.masgzy.dshm.ui.theme.drawDshmBackground
 
 /**
- * 应用外壳：整版对齐 dphmoblie/deepseek-harness-android 的 mobile-header +
- * bottom-navigation —— 品牌 Header（brand-symbol + deepseek + HARNESS 徽章 +
- * 全局阶段徽章）+ 主内容 + 底部三项导航（首页 / 环境 / 设置）。
+ * 应用外壳：整版复刻 dphmoblie/deepseek-harness-android 的 app-shell——
+ * 毛玻璃顶栏（96% 表面 + 下缘 1px 线，brand-symbol + deepseek + HARNESS 徽章 +
+ * 全局阶段徽章 + 仅首页设置钮）+ 底色双径向渐变的主内容 + 底部三项导航
+ * （首页 / 环境 / 设置，选中 accent 软底 12 圆角胶囊）。
  *
  * 未安装时只显示环境屏（安装引导与运行时管理一体）。
  * dsh 对话走独立全屏 HarnessActivity（门屏「打开对话」进入），与参考项目
@@ -62,6 +67,7 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
  */
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
+  val p = LocalDshmPalette.current
   val setup by viewModel.setup.collectAsState()
   val engineRunning by viewModel.engineRunning.collectAsState()
   val installed = viewModel.rootfsManager.isRootfsReady &&
@@ -86,68 +92,83 @@ fun AppRoot(viewModel: AppViewModel) {
     }
   }
 
-  Scaffold(
-    containerColor = MaterialTheme.colorScheme.background,
-    topBar = {
-      // mobile-header：表面底 + 下缘分隔线 + 投影（styles.css .mobile-header）
+  Box(
+    Modifier
+      .fillMaxSize()
+      .drawBehind { drawDshmBackground(p) },
+  ) {
+    Column(Modifier.fillMaxSize()) {
+      // ---- mobile-header：表面 96% 底 + 下缘 1px 分隔线 + 轻投影 ----
       Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 6.dp,
+        color = p.headerBg,
+        shadowElevation = 2.dp,
       ) {
-        Row(
-          Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .height(32.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          BrandHeader()
+        Column {
           Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier
+              .fillMaxWidth()
+              .statusBarsPadding()
+              .padding(horizontal = 16.dp, vertical = 13.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            StatusBadge(phase)
-            // 会话页右侧「应用设置」图标键（.header-settings）：44dp 表面灰底
-            if (current == "home") {
-              Box(
-                Modifier
-                  .size(44.dp)
-                  .background(
-                    LocalDshmPalette.current.surfaceMuted,
-                    RoundedCornerShape(DshmRadius.control.dp),
+            BrandHeader()
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(9.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              StatusBadge(phase)
+              // 会话页右侧「应用设置」图标键（.header-settings）：44dp 表面底 + 1px 描边
+              if (current == "home") {
+                Box(
+                  Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(DshmRadius.control.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, p.line, RoundedCornerShape(DshmRadius.control.dp))
+                    .clickable(
+                      interactionSource = remember { MutableInteractionSource() },
+                      indication = null,
+                    ) { goTo("settings") },
+                  contentAlignment = Alignment.Center,
+                ) {
+                  Icon(
+                    Icons.Outlined.Settings,
+                    contentDescription = "应用设置",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(21.dp),
                   )
-                  .clickable { goTo("settings") },
-                contentAlignment = Alignment.Center,
-              ) {
-                Icon(
-                  Icons.Outlined.Settings,
-                  contentDescription = "应用设置",
-                  tint = LocalDshmPalette.current.ink,
-                  modifier = Modifier.size(19.dp),
-                )
+                }
               }
             }
           }
+          Box(
+            Modifier
+              .fillMaxWidth()
+              .height(1.dp)
+              .background(p.line),
+          )
         }
       }
-    },
-    bottomBar = {
+
+      // ---- app-main：独立内容区（各屏自带滚动） ----
+      Box(Modifier.weight(1f)) {
+        NavHost(
+          navController = nav,
+          startDestination = "home",
+          modifier = Modifier.fillMaxSize(),
+        ) {
+          composable("home") { HomeScreen(viewModel) }
+          composable("environment") { EnvironmentScreen(viewModel) }
+          composable("settings") {
+            SettingsScreen(viewModel, onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } })
+          }
+          composable("logs") { LogsScreen(viewModel) }
+        }
+      }
+
+      // ---- bottom-navigation ----
       BottomNav(current, goTo)
-    },
-  ) { padding ->
-    NavHost(
-      navController = nav,
-      startDestination = "home",
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(padding),
-    ) {
-      composable("home") { HomeScreen(viewModel) }
-      composable("environment") { EnvironmentScreen(viewModel) }
-      composable("settings") { SettingsScreen(viewModel, onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } }) }
-      composable("logs") { LogsScreen(viewModel) }
     }
   }
 }
@@ -168,13 +189,13 @@ private fun currentPhase(
 }
 
 /**
- * 底部导航（.bottom-navigation）：表面底 + 上缘分隔线，每项为「图标 20 + 标签 11」
- * 的扁平竖排按钮——选中蓝、未选中灰，无 M3 药丸指示器，对齐参考项目形态。
+ * 底部导航（.bottom-navigation）：surface 92% 底 + 顶缘 1px 分隔线；
+ * item 54 高 / 12 圆角（图标 20-21 + 标签 11），选中 = accent 字 + accent 软底。
  */
 @Composable
 private fun BottomNav(current: String, goTo: (String) -> Unit) {
   val p = LocalDshmPalette.current
-  Surface(color = p.surface) {
+  Surface(color = p.navBg) {
     Column {
       Box(
         Modifier
@@ -186,7 +207,8 @@ private fun BottomNav(current: String, goTo: (String) -> Unit) {
         Modifier
           .fillMaxWidth()
           .navigationBarsPadding()
-          .height(58.dp),
+          .padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         NavItem(Icons.Rounded.ChatBubbleOutline, "首页", "home", current, goTo)
         NavItem(Icons.Rounded.Memory, "环境", "environment", current, goTo)
@@ -205,24 +227,34 @@ private fun androidx.compose.foundation.layout.RowScope.NavItem(
   goTo: (String) -> Unit,
 ) {
   val p = LocalDshmPalette.current
-  val active = current == route
-  val tint = if (active) p.blue else p.muted
+  val selected = current == route
   Column(
     Modifier
       .weight(1f)
-      .fillMaxSize()
-      .clickable { goTo(route) },
+      .height(54.dp)
+      .clip(RoundedCornerShape(DshmRadius.control.dp))
+      .background(if (selected) p.blueSoft else Color.Transparent)
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) { goTo(route) },
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.Center,
   ) {
-    Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
-    Spacer(Modifier.height(3.dp))
+    Icon(
+      icon,
+      contentDescription = label,
+      tint = if (selected) p.blue else p.muted,
+      modifier = Modifier.size(21.dp),
+    )
+    Spacer(Modifier.height(4.dp))
     Text(
       label,
       fontSize = 11.sp,
-      fontWeight = FontWeight.Medium,
-      color = tint,
+      fontWeight = if (selected) FontWeight(650) else FontWeight.Medium,
+      color = if (selected) p.blue else p.muted,
       lineHeight = 13.sp,
+      maxLines = 1,
     )
   }
 }
