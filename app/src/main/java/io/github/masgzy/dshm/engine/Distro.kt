@@ -65,9 +65,10 @@ object DistroCatalog {
     release = "26.04",
     fileName = "ubuntu-base-26.04.1-base-arm64.tar.gz",
     sha256 = "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd",
+    // 国内镜像优先，官方 cdimage 垫底（大陆直连 cdimage 常被限速）
     mirrors = listOf(
-      "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04.1-base-arm64.tar.gz",
       "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/26.04/release/ubuntu-base-26.04.1-base-arm64.tar.gz",
+      "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04.1-base-arm64.tar.gz",
     ),
     fallbackRef = "ubuntu:26.04",
   )
@@ -78,8 +79,8 @@ object DistroCatalog {
     fileName = "ubuntu-base-24.04.5-base-arm64.tar.gz",
     sha256 = "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
     mirrors = listOf(
-      "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
       "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
+      "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
     ),
     fallbackRef = "ubuntu:24.04",
   )
@@ -89,11 +90,12 @@ object DistroCatalog {
     release = "3.22",
     fileName = "alpine-minirootfs-3.22.7-aarch64.tar.gz",
     sha256 = "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623",
+    // 国内三镜像优先，官方 dl-cdn（Fastly，大陆不稳）垫底
     mirrors = listOf(
-      "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
       "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
       "https://mirrors.ustc.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
       "https://mirrors.aliyun.com/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+      "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
     ),
     fallbackRef = "alpine:3.22",
   )

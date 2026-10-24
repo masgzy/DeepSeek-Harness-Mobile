@@ -347,6 +347,9 @@ class DockerRegistryClient(
       while (r.code in 300..399) {
         val loc = r.header("Location") ?: throw IOException("重定向缺少 Location")
         if (++hops > 5) throw IOException("重定向次数过多")
+        // 详报重定向目标：部分镜像源把 blob 甩给境外 CDN（如 cloudfront），
+        // 大陆直连常黑洞 —— 日志里一眼定位卡点
+        onLog("blob 重定向 → ${runCatching { URL(loc).host }.getOrDefault("?")}（第 $hops 跳）")
         r = requestAbsolute(loc, handleAuth = false)
       }
       if (r.code !in 200..299) throw IOException("HTTP ${r.code}: blob $digest")

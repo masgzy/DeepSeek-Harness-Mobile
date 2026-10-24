@@ -24,4 +24,26 @@ object EngineProbe {
       conn?.disconnect()
     }
   }
+
+  /**
+   * 带凭据 URL 活性验证：200-399 = token 有效；401/403 = 凭据过期（引擎重启换了
+   * 新 token，日志尾部是旧地址）；连接失败 = 引擎已死。用于「从日志尾部解析 URL」
+   * 场景防旧 token 误入 WebView（否则表现为点进入对话即 refused）。
+   * 必须在非主线程调用（网络 I/O）。
+   */
+  fun checkUrl(url: String): Boolean {
+    var conn: HttpURLConnection? = null
+    return try {
+      conn = URL(url).openConnection() as HttpURLConnection
+      conn.connectTimeout = 2_000
+      conn.readTimeout = 3_000
+      conn.requestMethod = "GET"
+      conn.instanceFollowRedirects = false
+      conn.responseCode in 200..399
+    } catch (_: Exception) {
+      false
+    } finally {
+      conn?.disconnect()
+    }
+  }
 }

@@ -140,7 +140,8 @@ class RuntimeInstaller(private val context: Context) {
     val archive = File(Paths.cache(filesDir), NodeCatalog.tarballName(version))
     onProgress("下载 Node.js $version", 0, 1)
     Downloader.download(
-      NodeCatalog.tarballMirrors(version), archive, sha,
+      NodeCatalog.tarballMirrors(version, preferCn), archive, sha,
+      onLog = onLog,
     ) { done, total -> onProgress("下载 Node.js $version", done, total) }
     return archive
   }

@@ -83,12 +83,27 @@ fun HomeScreen(viewModel: AppViewModel) {
   }
 
   // 兜底轮询：请求已挂起但 URL 未就绪（如 APP 重启后附着到仍在运行的引擎）→
-  // 每 2 秒从引擎日志尾部解析一次
+  // 每 2 秒从引擎日志尾部解析一次（解析结果经活性验证，过期 token 不会被采用）。
+  // 90s 仍拿不到有效凭据（引擎已死/反复重启）→ 收场并提示，避免无限等待。
   LaunchedEffect(pendingOpen) {
-    while (pendingOpen && webUrl == null) {
+    if (!pendingOpen) return@LaunchedEffect
+    var waited = 0
+    while (pendingOpen && webUrl == null && waited < 90_000) {
       viewModel.resolveWebUrlFromLog()
       delay(2_000)
+      waited += 2_000
     }
+    if (pendingOpen && webUrl == null) {
+      pendingOpen = false
+      launching = false
+      openFailed = true
+      viewModel.refreshEngineState()
+    }
+  }
+
+  // 引擎真正停下（停止是异步的，进程树退出可达数秒）后才解除按钮禁用态
+  LaunchedEffect(running) {
+    if (!running) stopping = false
   }
 
   Column(
@@ -218,11 +233,10 @@ fun HomeScreen(viewModel: AppViewModel) {
             {
               stopping = true
               pendingOpen = false
-              viewModel.stopEngine()
-              stopping = false
+              viewModel.stopEngine() // 异步：完成后 running→false，LaunchedEffect 解除 stopping
             },
             Modifier.fillMaxWidth(),
-            enabled = !launching,
+            enabled = !launching && !stopping,
             icon = Icons.Outlined.Square,
           )
         }

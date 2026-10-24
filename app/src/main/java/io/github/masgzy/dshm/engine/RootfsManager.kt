@@ -45,7 +45,7 @@ class RootfsManager(private val filesDir: File) {
     when {
       // ① cdimage 直链优先（Ubuntu / Alpine），失败回退 registry
       distro.cdimage != null -> {
-        val ok = runCatching { installCdimage(distro, staging, onProgress) }
+        val ok = runCatching { installCdimage(distro, staging, onProgress, onLog) }
           .onFailure { AppLog.log("rootfs", "cdimage 路径失败，回退 registry: ${distro.fallbackImageRef}", it) }
           .isSuccess
         if (!ok) {
@@ -68,11 +68,24 @@ class RootfsManager(private val filesDir: File) {
     }
 
     // 原子启用：老 rootfs 换名备份，成功后删除
+    val ready = Paths.rootfsUsable(staging)
+    AppLog.log(
+      "rootfs",
+      "staging 就绪检查: bin/sh=${File(staging, "bin/sh").exists()} " +
+        "usr/bin/bash=${File(staging, "usr/bin/bash").exists()} entries=${staging.listFiles()?.size ?: 0} ready=$ready",
+    )
+    if (!ready) {
+      onLog("rootfs 解包产物缺少 bin/sh（解包不完整？），安装中止")
+      throw IOException("rootfs 解包产物不完整（bin/sh 缺失）")
+    }
     if (rootfsDir.exists()) {
       val bak = File(filesDir, Paths.ROOTFS_DIR + ".bak")
       bak.deleteRecursively()
-      rootfsDir.renameTo(bak)
+      if (!rootfsDir.renameTo(bak)) {
+        AppLog.log("rootfs", "老 rootfs 改名备份失败（继续尝试直接覆盖）")
+      }
     }
+    if (rootfsDir.exists()) rootfsDir.deleteRecursively()
     if (!staging.renameTo(rootfsDir)) {
       throw IOException("rootfs 暂存目录改名失败")
     }
@@ -86,6 +99,7 @@ class RootfsManager(private val filesDir: File) {
     distro: Distro,
     staging: File,
     onProgress: (step: String, done: Long, total: Long) -> Unit,
+    onLog: (String) -> Unit,
   ) {
     val cd = requireNotNull(distro.cdimage) { "distro 无 cdimage 引用" }
     val archive = File(cacheDir, cd.fileName)
@@ -93,7 +107,7 @@ class RootfsManager(private val filesDir: File) {
     val needDownload = cachedHash == null || !Hashing.equalsHex(cd.sha256, cachedHash)
     if (needDownload) {
       onProgress("下载 ${distro.label} rootfs", 0, 1)
-      Downloader.download(cd.mirrors, archive, cd.sha256) { done, total ->
+      Downloader.download(cd.mirrors, archive, cd.sha256, onLog = onLog) { done, total ->
         onProgress("下载 ${distro.label} rootfs", done, total)
       }
     }
@@ -122,7 +136,7 @@ class RootfsManager(private val filesDir: File) {
     )
     val archive = File(cacheDir, "lxc-${ref.suite}-rootfs.tar.xz")
     onProgress("下载 ${distro.label} rootfs", 0, resolved.size)
-    Downloader.download(resolved.urls, archive, resolved.sha256) { done, total ->
+    Downloader.download(resolved.urls, archive, resolved.sha256, onLog = onLog) { done, total ->
       onProgress("下载 ${distro.label} rootfs", done, total)
     }
     onProgress("解压 rootfs", 0, 1)

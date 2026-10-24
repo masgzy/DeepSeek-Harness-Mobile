@@ -124,10 +124,10 @@ npm config set registry "$DSH_NPM_REGISTRY" --global
 # dsh 与 pnpm（插件管理依赖）合并为一次 npm install：省去第二次依赖解析/元数据
 # 拉取（npmmirror 上两次安装大约可省 30-50% 耗时）
 log "[3/4] npm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} + pnpm ..."
-# --no-audit --no-fund 加速；--loglevel=error 只保留错误与结果，
-# 屏蔽 npm 的 deprecation 噪音（如 node-domexception@1.0.0 deprecated，
-# 该警告来自 dsh 的传递依赖，无害且不影响功能）
-npm install -g --no-audit --no-fund --loglevel=error \
+# --no-audit --no-fund 加速；--loglevel=info 全量输出 fetch/进度行 ——
+# 用户要求能看到 npm 完整日志（旧版 error 级在安装期间静默数分钟，
+# 无法判断是否卡住）。deprecation 警告属 dsh 传递依赖，无害。
+npm install -g --no-audit --no-fund --loglevel=info \
   "@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}" pnpm
 
 DSH_BIN="$(command -v dsh || true)"
@@ -137,7 +137,15 @@ dsh --version || true
 command -v pnpm >/dev/null 2>&1 || fail "pnpm 安装失败"
 pnpm --version || true
 
-# ---- 3.（可选）apt 源已按需切换，供用户后续容器 shell 使用 ----
+# ---- 3.5 V8 编译缓存预热（dsh 启动提速） ----
+# Node 22+ 支持 NODE_COMPILE_CACHE：首跑把解析产物落盘，之后每次启动免重复解析。
+# proot 下 stat/open 翻译开销大，dsh web 冷启动 10-30s；预热后引擎启动明显加快。
+# 引擎进程（EngineManager）启动时已注入同名环境变量，缓存目录保持一致。
+log "[3.5/4] 预热 Node 编译缓存（加速 dsh 启动）..."
+COMPILE_CACHE="$MARKER_DIR/compile-cache"
+mkdir -p "$COMPILE_CACHE"
+NODE_COMPILE_CACHE="$COMPILE_CACHE" dsh --version >/dev/null 2>&1 \
+  || log "  预热跳过（不影响功能）"
 
 # ---- 4. 写入就绪标记 ----
 log "[4/4] 写入安装标记 ..."
