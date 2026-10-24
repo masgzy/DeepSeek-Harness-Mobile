@@ -5,4 +5,8 @@
   <string name="engine_channel_desc">DeepSeek Harness engine status and keep-alive notifications</string>
   <string name="engine_notification_title">dsh engine running</string>
   <string name="engine_notification_text">DeepSeek Harness is serving on 127.0.0.1:%1$d. Tap to return.</string>
+  <!-- Termux terminal-view text selection handles (Apache-2.0) -->
+  <string name="paste_text">Paste</string>
+  <string name="copy_text">Copy</string>
+  <string name="text_selection_more">More…</string>
 </resources>

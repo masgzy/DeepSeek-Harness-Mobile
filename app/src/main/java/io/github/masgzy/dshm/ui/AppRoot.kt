@@ -18,9 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
-import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,6 +54,7 @@ import io.github.masgzy.dshm.ui.screens.LogsScreen
 import io.github.masgzy.dshm.ui.screens.ModelsScreen
 import io.github.masgzy.dshm.ui.screens.PluginsScreen
 import io.github.masgzy.dshm.ui.screens.SettingsScreen
+import io.github.masgzy.dshm.ui.screens.TerminalScreen
 import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 import io.github.masgzy.dshm.ui.theme.drawDshmBackground
@@ -60,12 +62,12 @@ import io.github.masgzy.dshm.ui.theme.drawDshmBackground
 /**
  * 应用外壳：整版复刻 dphmoblie/deepseek-harness-android 的 app-shell——
  * 毛玻璃顶栏（96% 表面 + 下缘 1px 线，brand-symbol + deepseek + HARNESS 徽章 +
- * 全局阶段徽章 + 仅首页设置钮）+ 底色双径向渐变的主内容 + 底部三项导航
- * （首页 / 环境 / 设置，选中 accent 软底 12 圆角胶囊）。
+ * 全局阶段徽章 + 仅首页终端/设置钮）+ 底色双径向渐变的主内容 + 底部三项导航
+ * （首页 / 插件 / 设置，对齐参考项目；选中 accent 软底 12 圆角胶囊）。
  *
- * 未安装时只显示环境屏（安装引导与运行时管理一体）。
- * dsh 对话走独立全屏 HarnessActivity（门屏「打开对话」进入），与参考项目
- * HarnessActivity 覆盖外壳的模式一致。
+ * 未安装时只显示环境屏（安装引导与运行时管理一体）；装好后环境操作并入设置页。
+ * dsh 对话走独立全屏 HarnessActivity；容器终端走独立全屏 TerminalScreen
+ * （顶栏终端按钮进入，隐藏底部导航）。
  */
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
@@ -85,6 +87,7 @@ fun AppRoot(viewModel: AppViewModel) {
   val backStack by nav.currentBackStackEntryAsState()
   val current = backStack?.destination?.route ?: "home"
   val phase = currentPhase(setup.running, setup.step, setup.error, engineRunning, viewModel)
+  val fullScreen = current == "terminal"
 
   val goTo: (String) -> Unit = { route ->
     nav.navigate(route) {
@@ -100,56 +103,41 @@ fun AppRoot(viewModel: AppViewModel) {
       .drawBehind { drawDshmBackground(p) },
   ) {
     Column(Modifier.fillMaxSize()) {
-      // ---- mobile-header：表面 96% 底 + 下缘 1px 分隔线 + 轻投影 ----
-      Surface(
-        color = p.headerBg,
-        shadowElevation = 2.dp,
-      ) {
-        Column {
-          Row(
-            Modifier
-              .fillMaxWidth()
-              .statusBarsPadding()
-              .padding(horizontal = 16.dp, vertical = 13.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            BrandHeader()
+      if (!fullScreen) {
+        // ---- mobile-header：表面 96% 底 + 下缘 1px 分隔线 + 轻投影 ----
+        Surface(
+          color = p.headerBg,
+          shadowElevation = 2.dp,
+        ) {
+          Column {
             Row(
-              horizontalArrangement = Arrangement.spacedBy(9.dp),
+              Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically,
             ) {
-              StatusBadge(phase)
-              // 会话页右侧「应用设置」图标键（.header-settings）：44dp 表面底 + 1px 描边
-              if (current == "home") {
-                Box(
-                  Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(DshmRadius.control.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(1.dp, p.line, RoundedCornerShape(DshmRadius.control.dp))
-                    .clickable(
-                      interactionSource = remember { MutableInteractionSource() },
-                      indication = null,
-                    ) { goTo("settings") },
-                  contentAlignment = Alignment.Center,
-                ) {
-                  Icon(
-                    Icons.Outlined.Settings,
-                    contentDescription = "应用设置",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(21.dp),
-                  )
+              BrandHeader()
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                StatusBadge(phase)
+                // 首页右侧「终端」「应用设置」图标键（.header-settings 同形态）
+                if (current == "home") {
+                  HeaderIconButton(Icons.Outlined.Terminal, "终端") { nav.navigate("terminal") { launchSingleTop = true } }
+                  HeaderIconButton(Icons.Outlined.Settings, "应用设置") { goTo("settings") }
                 }
               }
             }
+            Box(
+              Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(p.line),
+            )
           }
-          Box(
-            Modifier
-              .fillMaxWidth()
-              .height(1.dp)
-              .background(p.line),
-          )
         }
       }
 
@@ -161,28 +149,58 @@ fun AppRoot(viewModel: AppViewModel) {
           modifier = Modifier.fillMaxSize(),
         ) {
           composable("home") { HomeScreen(viewModel) }
-          composable("environment") { EnvironmentScreen(viewModel) }
+          composable("plugins") { PluginsScreen(viewModel) }
           composable("settings") {
             SettingsScreen(
               viewModel,
               onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
               onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
-              onOpenPlugins = { nav.navigate("plugins") { launchSingleTop = true } },
             )
           }
           composable("logs") { LogsScreen(viewModel) }
           composable("models") {
             ModelsScreen(viewModel, onBack = { nav.popBackStack() })
           }
-          composable("plugins") {
-            PluginsScreen(viewModel, onBack = { nav.popBackStack() })
+          composable("terminal") {
+            TerminalScreen(viewModel, onBack = { nav.popBackStack() })
           }
         }
       }
 
-      // ---- bottom-navigation ----
-      BottomNav(current, goTo)
+      // ---- bottom-navigation（终端全屏时隐藏） ----
+      if (!fullScreen) {
+        BottomNav(current, goTo)
+      }
     }
+  }
+}
+
+/** 顶栏图标键（.header-settings 同形态：44dp 表面底 + 1px 描边）。 */
+@Composable
+private fun HeaderIconButton(
+  icon: ImageVector,
+  label: String,
+  onClick: () -> Unit,
+) {
+  val p = LocalDshmPalette.current
+  Box(
+    Modifier
+      .size(44.dp)
+      .clip(RoundedCornerShape(DshmRadius.control.dp))
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, p.line, RoundedCornerShape(DshmRadius.control.dp))
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+      ) { onClick() },
+    contentAlignment = Alignment.Center,
+  ) {
+    Icon(
+      icon,
+      contentDescription = label,
+      tint = MaterialTheme.colorScheme.onSurface,
+      modifier = Modifier.size(21.dp),
+    )
   }
 }
 
@@ -224,7 +242,7 @@ private fun BottomNav(current: String, goTo: (String) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         NavItem(Icons.Rounded.ChatBubbleOutline, "首页", "home", current, goTo)
-        NavItem(Icons.Rounded.Memory, "环境", "environment", current, goTo)
+        NavItem(Icons.Outlined.Extension, "插件", "plugins", current, goTo)
         NavItem(Icons.Outlined.Settings, "设置", "settings", current, goTo)
       }
     }
