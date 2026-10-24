@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 深色模式窗口基座：与外壳深色背景 #0f1317 一致，避免 Compose 首帧前白闪 -->
+  <style name="Theme.Dshm" parent="android:Theme.Material.NoActionBar">
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowBackground">@color/dshm_window_bg</item>
+  </style>
+</resources>

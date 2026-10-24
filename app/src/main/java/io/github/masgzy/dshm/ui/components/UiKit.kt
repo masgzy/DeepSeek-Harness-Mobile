@@ -1,5 +1,6 @@
 package io.github.masgzy.dshm.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -27,11 +28,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.masgzy.dshm.R
 import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 
@@ -40,6 +45,73 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
  * styles.css（eyebrow / button / inline-alert / progress / install-steps /
  * detail-list / settings-section）。
  */
+
+/** 应用吉祥物图（dphmoblie 同款 app-mark）：按 [sizeDp] 等比渲染。 */
+@Composable
+fun AppMarkImage(sizeDp: Int, modifier: Modifier = Modifier) {
+  Image(
+    painter = painterResource(R.drawable.app_mark),
+    contentDescription = null,
+    modifier = modifier.size(sizeDp.dp),
+  )
+}
+
+/**
+ * 品牌 Header（.brand）：实底圆角图标块 + `deepseek` + `HARNESS` 徽章。
+ * 形态逐项对齐 dphmoblie/deepseek-harness-android 的 Brand 组件与
+ * .brand-symbol / .brand-name / .brand-badge 样式。
+ */
+@Composable
+fun BrandHeader(modifier: Modifier = Modifier) {
+  val p = LocalDshmPalette.current
+  Row(
+    modifier = modifier,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    // brand-symbol：32dp 圆角块，对角渐变（brand-bg → 蓝 45% 混合），内嵌 26dp 吉祥物
+    Box(
+      Modifier
+        .size(32.dp)
+        .clip(RoundedCornerShape(DshmRadius.inner.dp))
+        .background(
+          Brush.linearGradient(
+            0f to p.brandBg,
+            1f to lerpColor(p.brandBg, p.blue, 0.45f),
+          ),
+        ),
+      contentAlignment = Alignment.Center,
+    ) {
+      AppMarkImage(26)
+    }
+    Spacer(Modifier.width(8.dp))
+    Text(
+      "deepseek",
+      fontSize = 16.sp,
+      fontWeight = FontWeight.Bold,
+      color = p.ink,
+    )
+    Spacer(Modifier.width(7.dp))
+    // brand-badge：小号白字品牌底角标
+    Text(
+      "HARNESS",
+      fontSize = 9.sp,
+      fontWeight = FontWeight.Bold,
+      lineHeight = 9.sp,
+      color = p.onSolid,
+      modifier = Modifier
+        .background(p.brandBg, RoundedCornerShape(4.dp))
+        .padding(horizontal = 5.dp, vertical = 3.dp),
+    )
+  }
+}
+
+/** sRGB 线性插值（styles.css color-mix 的近似实现，用于渐变端点）。 */
+private fun lerpColor(a: Color, b: Color, fraction: Float): Color = Color(
+  red = a.red + (b.red - a.red) * fraction,
+  green = a.green + (b.green - a.green) * fraction,
+  blue = a.blue + (b.blue - a.blue) * fraction,
+  alpha = a.alpha + (b.alpha - a.alpha) * fraction,
+)
 
 /** eyebrow：蓝色小型大写标签（参考项目 .eyebrow）。 */
 @Composable
@@ -54,16 +126,17 @@ fun Eyebrow(text: String, modifier: Modifier = Modifier) {
   )
 }
 
-/** 屏标题组：eyebrow + 大标题（.screen-heading）。 */
+/** 屏标题组：eyebrow + 大标题（.screen-heading，h1 = 1.6875rem ≈ 27sp）。 */
 @Composable
 fun ScreenHeading(eyebrow: String, title: String, modifier: Modifier = Modifier) {
   Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Eyebrow(eyebrow)
     Text(
       title,
-      fontSize = 26.sp,
+      fontSize = 27.sp,
       fontWeight = FontWeight.Bold,
       lineHeight = 32.sp,
+      letterSpacing = (-0.25).sp,
       color = MaterialTheme.colorScheme.onBackground,
     )
   }

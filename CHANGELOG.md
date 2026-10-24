@@ -15,6 +15,48 @@
 - API Key Android Keystore 加密存储
 - 可选 Shizuku 集成（设备 shell 能力扩展）
 
+## [1.0.0-alpha.4] - 2026-10-24
+
+应用图标与外壳视觉逐像素对齐 dphmoblie/deepseek-harness-android；
+dsh 对话改为独立全屏页（参考项目 HarnessActivity 同款进入模式）；
+修复首次安装时 proot 工作区绑定警告。可从 alpha.2/alpha.3 覆盖安装。
+
+### 修复
+
+- **proot `can't sanitize binding "…/files/workspace"`**：根因是
+  `RuntimeInstaller`（首次安装 bootstrap 阶段）把工作区目录加入 `-b` 绑定前
+  没有创建该目录 —— proot 对绑定源做 realpath 解析失败即丢弃绑定，
+  容器内 `/root/projects` 在装完引擎后不可用。现于 proot 启动前 `mkdirs()`，
+  引擎启动路径（`EngineManager`）原本就有，两处口径一致；
+- **APP 重启后附着运行中引擎需干等 60 秒**：webUrl 状态在进程重启后清零，
+  轮询循环不读日志。现等待期间每 3 秒从引擎日志尾部补解析，门屏秒进对话页；
+- **启动引导日志噪音**：bootstrap 的 npm 安装追加 `--loglevel=error`，
+  屏蔽 dsh 传递依赖的 deprecation 警告（如 node-domexception@1.0.0，无害），
+  安装日志只保留错误与结果。
+
+### 变更
+
+- **应用图标更换**：整套 mipmap 资产（自适应图标前景/背景/圆形/传统图标，
+  五档密度）与吉祥物图（app-mark）来自 dphmoblie/deepseek-harness-android
+  （MIT），桌面观感与参考项目一致；
+- **dsh 对话改为独立全屏页**：新增 `HarnessActivity`（对齐参考项目
+  HarnessActivity 覆盖外壳的模式）—— 门屏「打开对话」→ 启动引擎并等待
+  token 就绪 → 全屏承载 dsh Web UI，顶栏/底部导航不再挤压页面，返回键回外壳；
+  引擎重启换 token 的 401 自愈逻辑随迁；
+- **品牌 Header 重做**：brand-symbol 实底圆角图标块（对角渐变）+ `deepseek`
+  + `HARNESS` 徽章，右侧阶段徽章 + 「应用设置」图标键（会话页），形态与
+  参考项目 mobile-header 一致；
+- **底部导航重做**：去除 M3 药丸指示器，改为参考项目 bottom-navigation 的
+  扁平三键（图标 20 + 标签 11），上缘分隔线，选中蓝 / 未选中灰；
+- **门屏 launch-panel 对齐**：52dp 实底图标块（--icon-solid-bg）内嵌 38dp
+  吉祥物、操作区上缘分隔线、引擎运行中提供「停止」次按钮（文案三态对齐
+  conversation-gate）；
+- **环境屏 runtime-overview**：蓝软渐变卡片底 + 48dp 实底 runtime-logo
+  内嵌 34dp 吉祥物；
+- **窗口级主题收尾**：`windowBackground` 浅色 #f3f5f8 / 深色 #0f1317
+  （values-night），Compose 首帧前不再白闪；HarnessActivity 使用终端深色
+  #0b0f13 专用主题。
+
 ## [1.0.0-alpha.3] - 2026-10-24
 
 修复 dsh web 认证失败（Web UI 无法进入），界面整体对齐

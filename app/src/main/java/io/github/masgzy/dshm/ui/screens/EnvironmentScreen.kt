@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.ui.AppViewModel
+import io.github.masgzy.dshm.ui.components.AppMarkImage
 import io.github.masgzy.dshm.ui.components.DangerQuietButton
 import io.github.masgzy.dshm.ui.components.DetailRow
 import io.github.masgzy.dshm.ui.components.InlineAlert
@@ -104,31 +105,40 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
     Spacer(Modifier.height(if (isOnboarding) 12.dp else 0.dp))
     ScreenHeading("应用管理", "Ubuntu 运行时")
 
-    // runtime-overview 卡片
+    // runtime-overview 卡片：蓝软渐变底（.runtime-overview）
     Column(
       Modifier
         .fillMaxWidth()
-        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(DshmRadius.card.dp))
+        .background(
+          androidx.compose.ui.graphics.Brush.linearGradient(
+            0f to androidx.compose.ui.graphics.lerp(
+              LocalDshmPalette.current.surface,
+              LocalDshmPalette.current.blueSoft,
+              0.48f,
+            ),
+            1f to MaterialTheme.colorScheme.surface,
+          ),
+          RoundedCornerShape(DshmRadius.card.dp),
+        )
         .border(1.dp, LocalDshmPalette.current.line, RoundedCornerShape(DshmRadius.card.dp))
         .padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
       Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        // runtime-logo：48dp 实底块（--icon-solid-bg）内嵌 34dp 吉祥物
         Box(
           Modifier
-            .size(44.dp)
-            .background(LocalDshmPalette.current.blueSoft, RoundedCornerShape(DshmRadius.inner.dp)),
+            .size(48.dp)
+            .background(
+              LocalDshmPalette.current.iconSolidBg,
+              RoundedCornerShape(DshmRadius.inner.dp),
+            ),
           contentAlignment = Alignment.Center,
         ) {
-          Icon(
-            Icons.Outlined.Memory,
-            null,
-            tint = LocalDshmPalette.current.blue,
-            modifier = Modifier.size(24.dp),
-          )
+          AppMarkImage(34)
         }
         Column(Modifier.weight(1f)) {
           Text(

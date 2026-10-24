@@ -11,6 +11,7 @@
 | 组件 | 版本 | 许可证 | 来源 | 用途 |
 | --- | --- | --- | --- | --- |
 | DeepSeek Harness (`@deepseek-ai/dsh`) | 0.2.1-rc.2 | MIT | npm `@deepseek-ai/dsh` | 容器内运行的 AI Agent 引擎 |
+| dphmoblie/deepseek-harness-android 图标资产 | 2026-10 main | MIT | GitHub `dphmoblie/deepseek-harness-android` | 应用图标（全套 mipmap）与吉祥物图（app-mark） |
 | Node.js | v24.22.0 | MIT（含捆绑组件各自许可） | nodejs.org 官方发行包 | 容器内 JavaScript 运行时 |
 | proot | 5.1.107.99（Termux 构建） | GPL-2.0-or-later | Termux 官方软件源 deb 包重打包 | 用户态 rootfs 虚拟化 |
 | libtalloc | 2.5.0 | LGPL-3.0-or-later | Termux 官方软件源 deb 包重打包 | proot 的动态内存分配依赖 |
@@ -32,7 +33,14 @@
 - **来源**：https://www.npmjs.com/package/@deepseek-ai/dsh 、https://github.com/deepseek-ai/deepseek-harness
 - **用途**：容器内核心 Agent 引擎，经 npm 全局安装进 Ubuntu rootfs，以 `dsh web` 启动官方 Web UI。
 
-### 1.2 Node.js
+### 1.2 dphmoblie/deepseek-harness-android 图标资产
+
+- **版权行（原始声明，未删改）**：`Copyright (c) 2026 DeepSeek Harness Mobile contributors`
+- **来源**：https://github.com/dphmoblie/deepseek-harness-android （`src/assets/app-mark.png`、`android/app/src/main/res/mipmap-*`、`LICENSE`）
+- **用途**：应用桌面图标（自适应图标前景/背景/圆形/传统图标）与外壳内吉祥物图。
+- **说明**：本项目外部视觉对齐参考项目；图标资产未作内容修改，仅按 Android 资源规范重命名引入。
+
+### 1.3 Node.js
 
 - **版权行（原始声明，未删改）**：`Copyright OpenJS Foundation and Node.js contributors. All rights reserved.`
 - **来源**：https://nodejs.org/dist/v24.22.0/
@@ -41,7 +49,7 @@
   其各自许可与版权声明以 Node.js 发行包内 `LICENSE` 文件为准；
   本项目分发的是未修改的官方 tarball，对应源码可从上述来源获取。
 
-### 1.3 MIT 许可证全文
+### 1.4 MIT 许可证全文
 
 ```text
 MIT License
