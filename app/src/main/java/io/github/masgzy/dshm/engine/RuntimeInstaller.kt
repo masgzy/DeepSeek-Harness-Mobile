@@ -61,10 +61,15 @@ class RuntimeInstaller(private val context: Context) {
 
     // 3) proot 内执行 bootstrap
     onProgress("容器内安装 Node.js + dsh", 0, 1)
+    // 工作区目录必须在启动 proot 前落盘：proot 对 -b 绑定源做 realpath 解析，
+    // 源不存在时打印
+    //   proot warning: can't sanitize binding "…/files/workspace": No such file or directory
+    // 并丢弃该绑定 —— 首次安装后容器内 /root/projects 将不可用。
+    val workspace = Paths.workspace(filesDir).apply { mkdirs() }
     val binds = listOf(
       nodeArchive.absolutePath + ":/dshm/node.tar.gz",
       script.absolutePath + ":/dshm/bootstrap.sh",
-      Paths.workspace(filesDir).absolutePath + ":/root/projects",
+      workspace.absolutePath + ":/root/projects",
     )
     val envPairs = listOf(
       "DEBIAN_FRONTEND=noninteractive",

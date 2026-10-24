@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <color name="ic_launcher_background">#4D6BFE</color>
+  <!-- 外壳窗口底色：浅色 #f3f5f8；深色见 values-night -->
+  <color name="dshm_window_bg">#F3F5F8</color>
+  <!-- dsh Web UI 对话页窗口底色：终端深色 #0b0f13（两套主题一致） -->
+  <color name="dshm_harness_bg">#0B0F13</color>
 </resources>
