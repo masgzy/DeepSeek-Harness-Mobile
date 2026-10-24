@@ -8,6 +8,30 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **容器系统可选**：环境屏「容器系统」卡 + 设置页「版本管理」支持切换
+  五个内置发行版 —— Debian 13 (trixie) / Debian 12 (bookworm) / Ubuntu 26.04（默认，
+  cdimage 直链优先）/ Ubuntu 24.04 (noble) / Alpine 3.22 (musl)；
+- **自定义 Docker 镜像**：内置五个选项之外可填任意公开镜像引用
+  （`repo:tag`、`ghcr.io/…` 等），按 Docker Registry v2 协议拉取 ——
+  参照 masgzy/proot-distro-i18n 实现移植：引用解析（Docker Hub 短名补
+  `library/`）→ WWW-Authenticate 挑战换匿名 token（按 repo 签发）→
+  OCI index / manifest-list 解 arm64 子清单 → 逐层 blob 下载（跨源重定向
+  丢弃 Authorization）→ SHA-256 按 digest 校验 → whiteout 感知解包；
+- **Docker Hub 镜像源回退**：daocloud → 1panel → 1ms → registry-1.docker.io
+  顺序自动回退（对齐 proot-distro-i18n mirrors 表，2025-2026 可用性整理）；
+- **Node.js 版本自定义**：远端 dist 目录（nodejs.org / npmmirror 双源）选任意
+  官方版本，SHA-256 从 SHASUMS256.txt 动态解析（默认版本保持锁定哈希），
+  支持手动输入 + 离线候选降级；
+- **dsh 版本自定义**（对齐 dphmoblie HarnessVersionsSection 思路）：npm
+  packument 全目录（corgi 文档），dist-tags 徽章（latest/next/beta/alpha），
+  SemVer 排序；可选「跟随 npm latest」或锁定任意历史版本；
+- **Alpine (musl) 容器支持**：bootstrap 改为 POSIX sh 兼容；Alpine 路径在
+  容器内切 apk 镜像源后 `apk add bash nodejs npm`（官方 Node glibc tarball
+  不兼容 musl），随后以 bash 重入统一安装流程；npm 源选国内时顺带 best-effort
+  切换容器内 apt 源（Debian/Ubuntu）。
+
 ### 计划中
 
 - SAF 文件桥：免权限导入导出设备文件

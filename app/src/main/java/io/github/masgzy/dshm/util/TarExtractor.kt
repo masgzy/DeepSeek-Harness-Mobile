@@ -85,6 +85,102 @@ object TarExtractor {
     }
   }
 
+  /**
+   * Docker 镜像 layer tarball 解包（registry 拉取路径专用）：
+   * 在普通解包语义上叠加 OCI/Docker whiteout 处理与设备文件跳过。
+   *
+   *  - `.wh..wh..opq`：不透明目录 —— 清空该目录既有内容（上层声明「以下不继承」）；
+   *  - `.wh.<name>`：删除同名文件/目录（上层删除标记）；
+   *  - char/block/fifo 设备条目：proot 用户态无需真实设备节点，跳过（镜像内
+   *    /dev/console 等由 proot 自带 -b /dev 覆盖）。
+   *
+   * 路径穿越防护与权限保留与 [extract] 完全一致。
+   */
+  fun extractLayer(input: InputStream, destDir: File, onProgress: (Long) -> Unit = {}) {
+    destDir.mkdirs()
+    input.use { raw ->
+      TarArchiveInputStream(decompress(raw)).use { tar ->
+        var entry = tar.nextTarEntry
+        var count = 0L
+        while (entry != null) {
+          val name = entry.name.removePrefix("./")
+          count++
+          if (count % 200L == 0L) onProgress(count)
+          if (name.isEmpty()) {
+            entry = tar.nextTarEntry
+            continue
+          }
+          val base = name.substringAfterLast('/')
+          val parentPath = name.substringBeforeLast('/', missingDelimiterValue = "")
+          when {
+            // 不透明目录：清空父目录既有内容
+            base == ".wh..wh..opq" -> {
+              val dir = if (parentPath.isEmpty()) destDir else File(destDir, parentPath)
+              if (dir.isDirectory) {
+                dir.listFiles()?.forEach { it.deleteRecursively() }
+                AppLog.log("tar-layer", "opaque dir: /$parentPath")
+              }
+              entry = tar.nextTarEntry
+              continue
+            }
+            // 删除标记：移除同名文件/目录
+            base.startsWith(".wh.") -> {
+              val targetName = base.removePrefix(".wh.")
+              val target = if (parentPath.isEmpty()) File(destDir, targetName) else File(destDir, "$parentPath/$targetName")
+              if (target.exists()) {
+                target.deleteRecursively()
+                AppLog.log("tar-layer", "whiteout: /$name")
+              }
+              entry = tar.nextTarEntry
+              continue
+            }
+          }
+          checkEntryPath(destDir, name)
+          val target = File(destDir, name)
+          when {
+            // 设备与 FIFO：跳过（不 mknod，proot 下无意义）
+            entry.isCharacterDevice || entry.isBlockDevice || entry.isFIFO -> {
+              AppLog.log("tar-layer", "跳过设备/FIFO 条目: $name")
+            }
+            entry.isDirectory -> {
+              target.mkdirs()
+              chmod(target, safeMode(entry.mode, isDir = true))
+            }
+            entry.isSymbolicLink -> {
+              target.parentFile?.mkdirs()
+              target.delete()
+              runCatching {
+                Files.createSymbolicLink(target.toPath(), Paths.get(entry.linkName))
+              }.onFailure { t ->
+                AppLog.log("tar-layer", "符号链接创建失败（已存在?）: $name", t)
+              }
+            }
+            entry.isLink -> {
+              val linkTarget = File(destDir, entry.linkName.removePrefix("./"))
+              if (linkTarget.exists()) {
+                target.parentFile?.mkdirs()
+                target.delete()
+                linkTarget.copyTo(target, overwrite = true)
+                chmod(target, safeMode(entry.mode, isDir = false))
+              } else {
+                AppLog.log("tar-layer", "硬链接目标缺失，跳过: ${entry.name} -> ${entry.linkName}")
+              }
+            }
+            else -> {
+              target.parentFile?.mkdirs()
+              if (target.isDirectory) target.deleteRecursively() // 文件替换目录
+              target.outputStream().use { out -> tar.copyTo(out) }
+              chmod(target, safeMode(entry.mode, isDir = false))
+            }
+          }
+          entry = tar.nextTarEntry
+        }
+        onProgress(count)
+        AppLog.log("tar-layer", "layer 解包完成: $count 个条目 -> ${destDir.absolutePath}")
+      }
+    }
+  }
+
   private fun decompress(raw: InputStream): InputStream {
     raw.mark(4)
     val magic = ByteArray(4)
