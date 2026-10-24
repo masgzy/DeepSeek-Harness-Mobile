@@ -54,6 +54,7 @@ import io.github.masgzy.dshm.ui.components.DshmDialog
 import io.github.masgzy.dshm.ui.components.DshVersionPickerDialog
 import io.github.masgzy.dshm.ui.components.DistroPickerDialog
 import io.github.masgzy.dshm.ui.components.InlineAlert
+import io.github.masgzy.dshm.ui.components.InstallLogBlock
 import io.github.masgzy.dshm.ui.components.InstallSteps
 import io.github.masgzy.dshm.ui.components.NodeVersionPickerDialog
 import io.github.masgzy.dshm.ui.components.Phases
@@ -219,11 +220,16 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
           Text(
             when (distro.id) {
               "alpine3" ->
-                "从 Docker registry 拉取 ${distro.imageRef}（约 5MB），随后在容器内通过 apk 安装 Node.js 与 dsh" +
+                "优先从官方直链下载 Alpine minirootfs（约 3MB，官方 CDN + 国内三镜像，SHA-256 锁定，" +
+                  "直链不可用才回退 Docker registry），随后在容器内通过 apk 安装 Node.js 与 dsh" +
                   "（官方 Node tarball 不兼容 musl；需网络，支持国内镜像加速）。"
-              "ubuntu26" ->
-                "获取 Ubuntu 官方基础镜像（约 30MB），随后在容器内安装 Node.js 与 dsh" +
-                  "（约 1-3 分钟，需网络，支持国内镜像加速；直链不可用时自动改走 Docker registry）。"
+              "ubuntu26", "ubuntu24" ->
+                "优先下载 Ubuntu 官方 ubuntu-base 基础镜像（约 30MB，8 段并行下载，官方 cdimage + TUNA 双镜像，" +
+                  "SHA-256 锁定），随后在容器内安装 Node.js 与 dsh（约 1-3 分钟，需网络；直链不可用时自动改走 Docker registry）。"
+              "debian13", "debian12" ->
+                "优先从 LXC 镜像源下载 Debian rootfs（动态解析最新构建，TUNA/USTC/官方三镜像，" +
+                  "索引内 SHA-256 校验，8 段并行下载），随后在容器内安装 Node.js 与 dsh" +
+                  "（约 1-3 分钟，需网络；直链不可用时自动改走 Docker registry）。"
               DistroCatalog.CUSTOM_ID ->
                 "从 Docker registry 拉取 ${distro.imageRef}，随后在容器内安装 Node.js 与 dsh" +
                   "（需为 glibc 系镜像且带 bash；musl 自定义镜像不受支持）。"
@@ -312,31 +318,9 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
       }
     }
 
-    // 安装日志（终端深色底，等宽小字）
+    // 安装日志（终端深色底，等宽小字，分级着色 + 复制）
     if (setup.logLines.isNotEmpty()) {
-      Column(
-        Modifier
-          .fillMaxWidth()
-          .background(LocalDshmPalette.current.terminalBg, RoundedCornerShape(DshmRadius.control.dp))
-          .border(1.dp, LocalDshmPalette.current.terminalLine, RoundedCornerShape(DshmRadius.control.dp))
-          .padding(12.dp),
-      ) {
-        Text(
-          "安装日志（最近 ${setup.logLines.size.coerceAtMost(30)} 条）",
-          fontSize = 11.sp,
-          fontWeight = FontWeight.SemiBold,
-          color = LocalDshmPalette.current.terminalLine,
-        )
-        Spacer(Modifier.height(8.dp))
-        setup.logLines.takeLast(30).forEach { line ->
-          Text(
-            line,
-            fontSize = 10.sp,
-            lineHeight = 14.sp,
-            color = androidx.compose.ui.graphics.Color(0xFFC6CED8),
-          )
-        }
-      }
+      InstallLogBlock(setup.logLines)
     }
 
     // 容器系统选择（未安装时可自由切换；已安装后改设置需重置环境）

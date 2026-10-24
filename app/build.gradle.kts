@@ -13,6 +13,10 @@ android {
   // （运行时行为仅由 targetSdk 决定）。
   compileSdk = 37
 
+  // NDK：仅用于 libtermux（Termux terminal-emulator 的 pty JNI，214 行 C）。
+  // 与 CI（.github/workflows/ci.yml setup-android packages）及本地开发锁定同版本。
+  ndkVersion = "27.2.12479018"
+
   defaultConfig {
     applicationId = "io.github.masgzy.dshm"
     minSdk = 26          // Android 8.0+
@@ -26,6 +30,20 @@ android {
 
     // 单一运行时：只支持 arm64-v8a（2019 年后的主流设备全覆盖）
     ndk { abiFilters += "arm64-v8a" }
+
+    externalNativeBuild {
+      cmake {
+        cppFlags += ""
+        arguments += listOf("-DCMAKE_BUILD_TYPE=Release")
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
+    }
   }
 
   buildFeatures {
@@ -70,6 +88,10 @@ android {
   }
 
   lint {
+    // 需在 JDK 21+ 下运行：AGP 新版 lint 内部分析（ECJ）依赖
+    // SequencedCollection.removeLast()（JDK 21 API），JDK 17 下会在分析
+    // Java 源文件（如 Termux JNI.java）时以 "Unexpected failure during
+    // lint analysis" 硬崩。CI 与本地均用 JDK 21 跑 Gradle（编译目标仍 17）。
     abortOnError = true
     checkReleaseBuilds = false
   }

@@ -21,11 +21,17 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.NetworkCheck
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.RestoreFromTrash
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -48,6 +55,8 @@ import io.github.masgzy.dshm.ui.components.DshmInputField
 import io.github.masgzy.dshm.ui.components.DistroPickerDialog
 import io.github.masgzy.dshm.ui.components.InlineAlert
 import io.github.masgzy.dshm.ui.components.NodeVersionPickerDialog
+import io.github.masgzy.dshm.ui.components.PrimaryButton
+import io.github.masgzy.dshm.ui.components.SecondaryButton
 import io.github.masgzy.dshm.ui.components.SectionCard
 import io.github.masgzy.dshm.ui.screens.RuntimePickersRow
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
@@ -62,7 +71,6 @@ fun SettingsScreen(
   viewModel: AppViewModel,
   onOpenLogs: () -> Unit,
   onOpenModels: () -> Unit,
-  onOpenPlugins: () -> Unit,
 ) {
   val p = LocalDshmPalette.current
   var editingPort by rememberSaveable { mutableStateOf(false) }
@@ -114,6 +122,89 @@ fun SettingsScreen(
       }
     }
 
+    // —— 运行环境（原环境屏核心操作并入设置） ——
+    SectionCard("运行环境") {
+      val running by viewModel.engineRunning.collectAsState()
+      Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        if (!running) {
+          PrimaryButton(
+            "启动引擎",
+            { viewModel.startEngine() },
+            Modifier.weight(1f),
+            icon = Icons.Outlined.PlayArrow,
+          )
+        } else {
+          SecondaryButton(
+            "停止引擎",
+            { viewModel.stopEngine() },
+            Modifier.weight(1f),
+            icon = Icons.Outlined.PowerSettingsNew,
+          )
+        }
+      }
+      Text(
+        if (running) "dsh web 正在运行（可在首页「打开对话」进入）" else "引擎未运行；也可直接在首页打开对话（自动拉起）。",
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      DetailLine("架构", "arm64-v8a")
+      DetailLine("系统版本", distro.display)
+      DetailLine("网络访问", "仅本应用内（127.0.0.1）")
+      DetailLine("运行组件", if (viewModel.engineManager.isRunnerAvailable) "可用" else "不可用")
+    }
+
+    // —— 镜像源测速 ——
+    SectionCard("镜像源测速") {
+      val probe by viewModel.mirrorProbe.collectAsState()
+      PrimaryButton(
+        when {
+          probe.running -> "测速中…"
+          probe.done -> "重新测速"
+          else -> "测速并选择最优镜像"
+        },
+        { viewModel.probeMirrors() },
+        Modifier.fillMaxWidth(),
+        enabled = !probe.running,
+        icon = Icons.Outlined.NetworkCheck,
+      )
+      Text(
+        "对 apt（Debian/Ubuntu）与 apk（Alpine）的公开镜像站并行探测首字节延迟，" +
+          "自动选用最快的并写入容器（/etc/apt、/etc/apk），安装时同样生效。",
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      if (probe.error != null) {
+        InlineAlert(title = "测速失败", message = probe.error!!, danger = true)
+      }
+      if (probe.apt.isNotEmpty()) {
+        Text(
+          "apt 镜像（当前：${aptMirrorLabel(viewModel)}）",
+          fontSize = 12.5.sp,
+          fontWeight = FontWeight.Medium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        probe.apt.forEach { MirrorResultRow(it) }
+      }
+      if (probe.apk.isNotEmpty()) {
+        Text(
+          "apk 镜像（当前：${apkMirrorLabel(viewModel)}）",
+          fontSize = 12.5.sp,
+          fontWeight = FontWeight.Medium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        probe.apk.forEach { MirrorResultRow(it) }
+      }
+      if (probe.applied) {
+        Text(
+          "已把择优镜像写入容器（next apt/apk 操作生效）。",
+          fontSize = 11.5.sp,
+          color = LocalDshmPalette.current.blue,
+        )
+      }
+    }
+
     // —— 模型与插件 ——
     SectionCard("模型与插件") {
       SettingRow(
@@ -123,12 +214,11 @@ fun SettingsScreen(
         value = null,
         onClick = onOpenModels,
       )
-      SettingRow(
-        icon = Icons.Outlined.Extension,
-        title = "插件管理",
-        hint = "安装/移除/更新 dsh 树外插件（npm 包）",
-        value = null,
-        onClick = onOpenPlugins,
+      Text(
+        "插件管理已移至底部导航「插件」页。",
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }
 
@@ -343,3 +433,49 @@ private fun DetailLine(label: String, value: String) {
     )
   }
 }
+
+/** 镜像测速结果行：名称 + 延迟（失败标红原因）。 */
+@Composable
+private fun MirrorResultRow(result: io.github.masgzy.dshm.util.MirrorProbe.Result) {
+  Row(
+    Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      result.mirror.name,
+      fontSize = 12.5.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+      if (result.latencyMs != null) "${result.latencyMs} ms" else "不可达",
+      fontSize = 12.5.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = if (result.latencyMs != null) {
+        when {
+          result.latencyMs < 100 -> Color(0xFF34A853)
+          result.latencyMs < 300 -> Color(0xFF9AA7B5)
+          else -> Color(0xFFB08D57)
+        }
+      } else {
+        MaterialTheme.colorScheme.error
+      },
+    )
+  }
+}
+
+/** 当前 apt 镜像展示名（未测速 = 未选择）。 */
+internal fun aptMirrorLabel(viewModel: AppViewModel): String =
+  when (val base = viewModel.aptMirror) {
+    "" -> "未测速"
+    "http://archive.ubuntu.com", "http://deb.debian.org" -> "官方源"
+    else -> base.removePrefix("https://").removePrefix("http://").substringBefore('.')
+  }
+
+/** 当前 apk 镜像展示名。 */
+internal fun apkMirrorLabel(viewModel: AppViewModel): String =
+  when (val base = viewModel.apkMirror) {
+    "" -> "未测速"
+    "https://dl-cdn.alpinelinux.org" -> "官方源"
+    else -> base.removePrefix("https://").removePrefix("http://").substringBefore('.')
+  }
