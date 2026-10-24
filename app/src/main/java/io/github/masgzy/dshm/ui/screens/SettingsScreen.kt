@@ -18,7 +18,9 @@ import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,7 +54,12 @@ import io.github.masgzy.dshm.util.AppLog
  * 图标 + 标题 + 说明（hint）+ 右箭头；数值项行内展开编辑。
  */
 @Composable
-fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
+fun SettingsScreen(
+  viewModel: AppViewModel,
+  onOpenLogs: () -> Unit,
+  onOpenModels: () -> Unit,
+  onOpenPlugins: () -> Unit,
+) {
   val p = LocalDshmPalette.current
   var editingPort by rememberSaveable { mutableStateOf(false) }
   var portDraft by rememberSaveable { mutableStateOf("") }
@@ -95,6 +102,24 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
           },
         )
       }
+    }
+
+    // —— 模型与插件 ——
+    SectionCard("模型与插件") {
+      SettingRow(
+        icon = Icons.Outlined.Key,
+        title = "模型配置",
+        hint = "内置/自定义供应商 API Key、默认模型、连通性测试",
+        value = null,
+        onClick = onOpenModels,
+      )
+      SettingRow(
+        icon = Icons.Outlined.Extension,
+        title = "插件管理",
+        hint = "安装/移除/更新 dsh 树外插件（npm 包）",
+        value = null,
+        onClick = onOpenPlugins,
+      )
     }
 
     // —— 日志与排查 ——

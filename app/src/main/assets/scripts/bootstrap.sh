@@ -68,6 +68,18 @@ DSH_BIN="$(command -v dsh || true)"
 log "  dsh 位于: $DSH_BIN"
 dsh --version || true
 
+# ---- 2.5 全局安装 pnpm（dsh plugin 插件管理的依赖） ----
+# dsh plugin --profile web 会把参数转发给 profile 目录里的 pnpm；
+# Node 自带 corepack 但其 shim 需要额外启用步骤，直接 npm -g 安装更稳。
+log "[2.5/4] npm install -g pnpm（插件管理依赖）..."
+if command -v pnpm >/dev/null 2>&1; then
+  log "  pnpm 已存在，跳过"
+else
+  npm install -g --no-audit --no-fund --loglevel=error pnpm
+  command -v pnpm >/dev/null 2>&1 || fail "pnpm 安装失败"
+fi
+pnpm --version || true
+
 # ---- 3. 重建 apt 源（可选，供用户后续在容器 shell 里使用） ----
 # 保持镜像默认源不动；如需加速可自行替换 /etc/apt/sources.list.d/ubuntu.sources
 
@@ -80,6 +92,9 @@ dsh=${DSH_VERSION:-latest}
 registry=$DSH_NPM_REGISTRY
 installed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
+# pnpm 就绪标记（App 内插件管理据此跳过补装检查）
+printf 'pnpm=%s\ninstalled_at=%s\n' "$(pnpm --version 2>/dev/null || echo unknown)" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER_DIR/pnpm-installed"
 
 log "=== 引导完成：dsh web --no-open 即可启动 ==="
 exit 0

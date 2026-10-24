@@ -50,6 +50,8 @@ import io.github.masgzy.dshm.ui.components.phaseForStep
 import io.github.masgzy.dshm.ui.screens.EnvironmentScreen
 import io.github.masgzy.dshm.ui.screens.HomeScreen
 import io.github.masgzy.dshm.ui.screens.LogsScreen
+import io.github.masgzy.dshm.ui.screens.ModelsScreen
+import io.github.masgzy.dshm.ui.screens.PluginsScreen
 import io.github.masgzy.dshm.ui.screens.SettingsScreen
 import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
@@ -161,9 +163,20 @@ fun AppRoot(viewModel: AppViewModel) {
           composable("home") { HomeScreen(viewModel) }
           composable("environment") { EnvironmentScreen(viewModel) }
           composable("settings") {
-            SettingsScreen(viewModel, onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } })
+            SettingsScreen(
+              viewModel,
+              onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
+              onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
+              onOpenPlugins = { nav.navigate("plugins") { launchSingleTop = true } },
+            )
           }
           composable("logs") { LogsScreen(viewModel) }
+          composable("models") {
+            ModelsScreen(viewModel, onBack = { nav.popBackStack() })
+          }
+          composable("plugins") {
+            PluginsScreen(viewModel, onBack = { nav.popBackStack() })
+          }
         }
       }
 

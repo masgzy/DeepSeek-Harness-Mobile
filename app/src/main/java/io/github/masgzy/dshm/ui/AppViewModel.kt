@@ -7,7 +7,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.masgzy.dshm.engine.EngineManager
 import io.github.masgzy.dshm.engine.EngineService
+import io.github.masgzy.dshm.engine.ModelConfigManager
 import io.github.masgzy.dshm.engine.Paths
+import io.github.masgzy.dshm.engine.PluginManager
 import io.github.masgzy.dshm.engine.RootfsManager
 import io.github.masgzy.dshm.engine.RuntimeInstaller
 import io.github.masgzy.dshm.engine.UpdateManager
@@ -41,6 +43,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   val engineManager = EngineManager(application)
   private val runtimeInstaller = RuntimeInstaller(application)
   private val updateManager = UpdateManager(application.filesDir)
+
+  /** 应用内模型配置（凭据/自定义供应商/默认模型）与容器同步。 */
+  val modelConfig = ModelConfigManager(application)
+
+  /** 插件管理（dsh plugin / pnpm）。 */
+  val pluginManager = PluginManager(application)
 
   private val _setup = MutableStateFlow(SetupState())
   val setup: StateFlow<SetupState> = _setup
@@ -149,6 +157,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
           onProgress = { step, done, total -> updateProgress(step, done, total) },
           onLog = { line -> appendLog(line) },
         )
+        // 首装完成即同步模型配置（用户可能在安装前就填好了 Key）
+        modelConfig.sync()
         _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
       } catch (t: Throwable) {
         AppLog.log("setup", "安装失败", t)
@@ -169,6 +179,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
           updateProgress(step, done, total)
         }
         if (!ok) throw RuntimeException("预装运行时启用失败，详见日志")
+        // 预装路径同样补同步模型配置
+        modelConfig.sync()
         _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
       } catch (t: Throwable) {
         AppLog.log("setup", "预装运行时安装失败", t)

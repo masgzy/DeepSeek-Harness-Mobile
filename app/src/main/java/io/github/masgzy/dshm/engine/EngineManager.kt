@@ -18,6 +18,7 @@ import kotlin.concurrent.thread
 class EngineManager(private val context: Context) {
 
   private val prootRuntime = ProotRuntime(context)
+  private val modelConfig = ModelConfigManager(context)
 
   val rootfsDir: File get() = Paths.rootfs(context.filesDir)
   val engineLog: File get() = Paths.engineLog(context.filesDir)
@@ -94,6 +95,10 @@ class EngineManager(private val context: Context) {
       AppLog.log("engine", "proot 运行器缺失（nativeLibraryDir 无 libdsh_proot.so/libdsh_proot_loader.so）")
       return false
     }
+    // 启动前把应用内模型配置并写进容器（凭据文档 + home 级 patch）：
+    // 覆盖看门狗重启路径 —— 用户改完 Key 不重启 APP 也能生效。
+    // 失败不阻断启动（容器内可能还是旧凭据，Web UI 模型页仍可用）。
+    if (Paths.dshInstalled(rootfsDir)) modelConfig.sync()
     val workspace = Paths.workspace(context.filesDir).apply { mkdirs() }
     val binds = listOf(
       workspace.absolutePath + ":/root/projects",
