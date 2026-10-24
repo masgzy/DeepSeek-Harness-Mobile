@@ -1,6 +1,7 @@
 package io.github.masgzy.dshm.util
 
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -18,6 +19,16 @@ import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
  *  - 拒绝绝对路径与 "../" 穿越，所有条目必须落在目标目录内；
  *  - 保留 tar 内的 POSIX 权限位（可执行位对 node/proot 至关重要）；
  *  - 正确处理符号链接与硬链接（ubuntu-base 内含大量 /bin -> usr/bin 类链接）。
+ *
+ * 兼容性要点（2026-10 真机 bug 修复，均经真实包实证）：
+ *  - 裸根条目：alpine-minirootfs / lxc-images rootfs 的首个条目是 "./"（去前缀后
+ *    变空名），必须跳过而不是当非法条目抛出 —— 否则 SHA-256 已校验通过的直链包
+ *    也会在解压环节失败，被上层误判为「直链不可用」而回退 Docker；
+ *  - 绝对符号链接：alpine:3.22 镜像层与 minirootfs 内大量 "bin/sh -> /bin/busybox"
+ *    形式的绝对目标，若原样创建会指向 Android 系统根（悬空），导致 rootfs
+ *    就绪检查 bin/sh isFile=false。这里把绝对目标改写为「从链接所在目录
+ *    出发、带 ../ 上溯的 rootfs 内相对路径」，rootfs 整体自包含，proot 与宿主侧
+ *    File 解析都落在 rootfs 内。
  */
 object TarExtractor {
 
@@ -29,6 +40,19 @@ object TarExtractor {
       AppLog.log("tar", "解压失败: ${archive.name}", t)
       false
     }
+
+  /**
+   * 同 [extract]，但失败时抛出携带原因的 IOException ——
+   * 供 rootfs 安装链路把失败原因透传到安装日志（而非只写 AppLog）。
+   */
+  fun extractOrThrow(archive: File, destDir: File, onProgress: (Long) -> Unit = {}) {
+    try {
+      extract(archive.inputStream().buffered(), archive.length(), destDir, onProgress)
+    } catch (t: Throwable) {
+      AppLog.log("tar", "解压失败: ${archive.name}", t)
+      throw IOException("解压 ${archive.name} 失败: ${t.message}", t)
+    }
+  }
 
   fun extract(
     input: InputStream,
@@ -43,6 +67,12 @@ object TarExtractor {
         var count = 0L
         while (entry != null) {
           val name = entry.name.removePrefix("./")
+          if (name.isEmpty()) {
+            // 裸根条目（"./" / "." / "/"）：alpine-minirootfs、lxc-images rootfs
+            // 的首个条目，不能当非法条目抛出（历史 bug：导致直链包解压全败）
+            entry = tar.nextTarEntry
+            continue
+          }
           checkEntryPath(destDir, name)
           val target = File(destDir, name)
           when {
@@ -52,25 +82,34 @@ object TarExtractor {
             }
             entry.isSymbolicLink -> {
               target.parentFile?.mkdirs()
-              target.delete()
-              Files.createSymbolicLink(
-                target.toPath(),
-                Paths.get(entry.linkName),
-              )
+              if (target.isDirectory) target.deleteRecursively() else target.delete()
+              val relTarget = relativeLinkTarget(name, entry.linkName)
+              runCatching {
+                Files.createSymbolicLink(target.toPath(), Paths.get(relTarget))
+              }.onFailure { t ->
+                AppLog.log("tar", "符号链接创建失败: $name -> $relTarget", t)
+              }
             }
             entry.isLink -> {
               // 硬链接：目标一定在本包内，找到后直接复制内容
-              val linkTarget = File(destDir, entry.linkName.removePrefix("./"))
+              // （目标名归一化：去前导 "/" 与 "./"，防止引用到宿主 Android 文件系统）
+              val linkTarget = File(destDir, hardLinkTargetPath(entry.linkName))
               if (linkTarget.isFile) {
                 target.parentFile?.mkdirs()
+                if (target.isDirectory) target.deleteRecursively() else target.delete()
                 linkTarget.copyTo(target, overwrite = true)
                 chmod(target, safeMode(entry.mode, isDir = false))
               } else {
                 AppLog.log("tar", "硬链接目标缺失，跳过: ${entry.name} -> ${entry.linkName}")
               }
             }
+            // 设备/FIFO：proot 自带 -b /dev 覆盖，落成空文件反而占位
+            entry.isCharacterDevice || entry.isBlockDevice || entry.isFIFO -> {
+              AppLog.log("tar", "跳过设备/FIFO 条目: $name")
+            }
             else -> {
               target.parentFile?.mkdirs()
+              if (target.isDirectory) target.deleteRecursively() // 文件替换目录
               target.outputStream().use { out -> tar.copyTo(out) }
               chmod(target, safeMode(entry.mode, isDir = false))
             }
@@ -148,18 +187,21 @@ object TarExtractor {
             }
             entry.isSymbolicLink -> {
               target.parentFile?.mkdirs()
-              target.delete()
+              if (target.isDirectory) target.deleteRecursively() else target.delete()
+              val relTarget = relativeLinkTarget(name, entry.linkName)
               runCatching {
-                Files.createSymbolicLink(target.toPath(), Paths.get(entry.linkName))
+                Files.createSymbolicLink(target.toPath(), Paths.get(relTarget))
               }.onFailure { t ->
-                AppLog.log("tar-layer", "符号链接创建失败（已存在?）: $name", t)
+                AppLog.log("tar-layer", "符号链接创建失败（已存在?）: $name -> $relTarget", t)
               }
             }
             entry.isLink -> {
-              val linkTarget = File(destDir, entry.linkName.removePrefix("./"))
+              // 目标名归一化：Docker 层硬链接目标可能是绝对路径（/usr/bin/x），
+              // 不归一化会 File(destDir, "/usr/bin/x") → 读到宿主 Android 根路径
+              val linkTarget = File(destDir, hardLinkTargetPath(entry.linkName))
               if (linkTarget.exists()) {
                 target.parentFile?.mkdirs()
-                target.delete()
+                if (target.isDirectory) target.deleteRecursively() else target.delete()
                 linkTarget.copyTo(target, overwrite = true)
                 chmod(target, safeMode(entry.mode, isDir = false))
               } else {
@@ -196,6 +238,38 @@ object TarExtractor {
       else -> raw // 纯 .tar
     }
   }
+
+  /**
+   * 归一化符号链接目标：绝对目标（/bin/busybox）→「从链接所在目录出发、带
+   * ../ 上溯」的 rootfs 内相对路径；相对目标原样返回。
+   *
+   * 例（entryName → linkName → 结果）：
+   *  - bin/sh          /bin/busybox      → busybox
+   *  - usr/bin/shuf    /bin/busybox      → ../../bin/busybox
+   *  - var/run         /run              → ../run
+   *  - sbin            /usr/sbin         → usr/sbin（链接在根目录，无需上溯）
+   *
+   * 不做转换的后果（真机实证）：符号链接指向 Android 系统根，rootfs 内
+   * bin/busybox 明明存在，bin/sh 却是悬空链接，就绪检查 isFile=false。
+   */
+  private fun relativeLinkTarget(entryName: String, linkName: String): String {
+    if (!linkName.startsWith("/")) return linkName
+    val linkDir = entryName.substringBeforeLast('/', missingDelimiterValue = "")
+      .removePrefix("./").trimEnd('/')
+    val from = linkDir.split('/').filter { it.isNotEmpty() }
+    val to = linkName.trimStart('/').split('/').filter { it.isNotEmpty() }
+    if (to.isEmpty()) return "." // 目标即 rootfs 根（罕见）
+    var common = 0
+    while (common < from.size && common < to.size && from[common] == to[common]) common++
+    val parts = ArrayList<String>(from.size - common + to.size)
+    repeat(from.size - common) { parts.add("..") }
+    for (i in common until to.size) parts.add(to[i])
+    return if (parts.isEmpty()) "." else parts.joinToString("/")
+  }
+
+  /** 硬链接目标归一化：去前导 "/" 与 "." 段，保证落在 destDir 内。 */
+  private fun hardLinkTargetPath(linkName: String): String =
+    linkName.split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
 
   /** 防路径穿越：名称必须解析后仍位于 destDir 之内。 */
   private fun checkEntryPath(destDir: File, name: String) {
