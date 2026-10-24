@@ -38,6 +38,13 @@ object Paths {
   const val NPM_REGISTRY_CN = "https://registry.npmmirror.com"
   const val NPM_REGISTRY_OFFICIAL = "https://registry.npmjs.org"
 
+  // Alpine apk 镜像（musl 发行版容器内 apk add 使用）
+  const val ALPINE_MIRROR_CN = "https://mirrors.tuna.tsinghua.edu.cn/alpine"
+  const val ALPINE_MIRROR_OFFICIAL = "https://dl-cdn.alpinelinux.org/alpine"
+
+  // apt 镜像（选择国内 npm 源时顺带切换容器内 apt 源，best-effort）
+  const val APT_MIRROR_CN = "https://mirrors.tuna.tsinghua.edu.cn"
+
   // ---- 目录布局 ----
   const val ROOTFS_DIR = "rootfs"
   const val PROOT_TMP_DIR = "proot-tmp" // proot 自身临时目录（cacheDir 下）
@@ -49,9 +56,13 @@ object Paths {
   fun engineLog(filesDir: File): File = File(filesDir, "$LOGS_DIR/engine.log")
   fun workspace(contextFilesDir: File): File = File(contextFilesDir, "workspace")
 
-  /** rootfs 就绪判定：bash + bootstrap 安装标记同时存在。 */
+  /**
+   * rootfs 就绪判定：存在 /bin/sh 或 /usr/bin/bash。
+   * Alpine 基础镜像只有 busybox sh（/bin/sh -> /bin/busybox 符号链接，isFile 为 true），
+   * Debian/Ubuntu 两者皆有；bootstrap 前后均以本判定为容器可用标准。
+   */
   fun rootfsUsable(rootfsDir: File): Boolean =
-    File(rootfsDir, "usr/bin/bash").isFile
+    File(rootfsDir, "bin/sh").isFile || File(rootfsDir, "usr/bin/bash").isFile
 
   /** dsh 安装完成标记（由容器内 bootstrap.sh 写入）。 */
   fun dshInstalled(rootfsDir: File): Boolean =

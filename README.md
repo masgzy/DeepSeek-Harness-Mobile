@@ -37,11 +37,18 @@
 ### ✨ 特性
 
 - **免 root / 免 Termux**：单 APK，全部逻辑跑在应用私有目录内，卸载即完全清除
-- **完整 Linux 用户态**：Ubuntu 26.04 LTS (Resolute Raccoon) rootfs，AI 生成的 bash 命令真实可执行
-- **双轨运行时供应**：
-  - 🪶 **轻量通道**：下载官方 ubuntu-base 镜像（约 30MB），容器内一键安装 Node.js + dsh
+- **完整 Linux 用户态**：容器系统可选 —— **Debian 13 / Debian 12 / Ubuntu 26.04（默认）/
+  Ubuntu 24.04 / Alpine 3.22** 五个内置，或任意**自定义 Docker 镜像**（Registry v2 拉取，
+  参照 masgzy/proot-distro-i18n 实现），AI 生成的命令真实可执行
+- **运行时版本可选**：Node.js 任意官方版本（dist 目录远端选择 + 手动输入）、
+  dsh 任意 npm 版本（dist-tags 徽章 + 跟随 latest，对齐 dphmoblie）
+- **双轨运行时供应**（预装通道仅 Ubuntu 26.04）：
+  - 🪶 **轻量通道**：下载所选发行版 rootfs（Ubuntu 官方 base 约 30MB / Alpine 约 5MB /
+    Debian 约 50MB），容器内一键安装 Node.js + dsh
   - ⚡ **预装通道**：CI 构建的开箱即用 bundle（SHA-256 锁定），下载即可用，适合弱网环境
-- **供应链安全**：所有下载物强制 SHA-256 校验，镜像自动回退（官方源 ↔ 国内镜像）
+- **供应链安全**：所有下载物强制 SHA-256 校验（rootfs / Node tarball /
+  镜像层逐层 digest 校验），镜像自动回退（官方源 ↔ 国内镜像；Docker Hub 走
+  daocloud → 1panel → 1ms → 官方四源回退）
 - **前台保活**：前台服务 + 5 秒看门狗，长任务运行不怕后台回收
 - **认证自愈**：自动解析 dsh web 启动时打印的带 token 访问地址，
   引擎重启换 token 后 401 自愈重连，无需手动重开链接
@@ -117,7 +124,7 @@ OUT=runtime/out ./runtime/build-rootfs.sh
 | --- | --- | --- |
 | Web UI 端口 | App → 设置 | `3080` |
 | npm 源 | App → 设置 | 国内镜像（npmmirror） |
-| rootfs 下载源 | 自动回退 | cdimage 官方 → 清华 TUNA |
+| rootfs 下载源 | 自动回退 | cdimage 官方 → 清华 TUNA（Ubuntu 26.04）；Docker Hub 走 daocloud → 1panel → 1ms → registry-1.docker.io（其余发行版 / 自定义镜像） |
 | Node.js 下载源 | 自动回退 | nodejs.org → npmmirror |
 | 工作区（宿主） | `Android/data/io.github.masgzy.dshm/files/workspace` | 容器内 `/root/projects` |
 
@@ -126,6 +133,8 @@ OUT=runtime/out ./runtime/build-rootfs.sh
 - [x] 框架搭建：proot 容器 + Node + dsh 一键安装
 - [x] 双轨运行时供应（在线 bootstrap / CI 预装 bundle）
 - [x] 前台保活 + 看门狗自愈
+- [x] 容器系统可选（Debian 13/12 · Ubuntu 24.04/26.04 · Alpine + 自定义 Docker 镜像）
+- [x] Node.js / dsh 版本自定义（对齐 dphmoblie 版本管理）
 - [ ] SAF 文件桥：免权限导入导出设备文件（参照 dphmoblie）
 - [ ] Digest 锁定的运行时增量更新 + 自动回滚
 - [ ] API Key Android Keystore 加密存储

@@ -40,12 +40,16 @@ import androidx.compose.ui.unit.sp
 import io.github.masgzy.dshm.BuildConfig
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.ui.AppViewModel
-import io.github.masgzy.dshm.ui.components.DangerQuietButton
-import io.github.masgzy.dshm.ui.components.InlineAlert
-import io.github.masgzy.dshm.ui.components.SectionCard
 import io.github.masgzy.dshm.ui.components.CapsuleSelector
+import io.github.masgzy.dshm.ui.components.DangerQuietButton
+import io.github.masgzy.dshm.ui.components.DshVersionPickerDialog
 import io.github.masgzy.dshm.ui.components.DshmDialog
 import io.github.masgzy.dshm.ui.components.DshmInputField
+import io.github.masgzy.dshm.ui.components.DistroPickerDialog
+import io.github.masgzy.dshm.ui.components.InlineAlert
+import io.github.masgzy.dshm.ui.components.NodeVersionPickerDialog
+import io.github.masgzy.dshm.ui.components.SectionCard
+import io.github.masgzy.dshm.ui.screens.RuntimePickersRow
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 import io.github.masgzy.dshm.util.AppLog
 
@@ -64,6 +68,12 @@ fun SettingsScreen(
   var editingPort by rememberSaveable { mutableStateOf(false) }
   var portDraft by rememberSaveable { mutableStateOf("") }
   var confirmUninstall by remember { mutableStateOf(false) }
+  var showDistroPicker by remember { mutableStateOf(false) }
+  var showNodePicker by remember { mutableStateOf(false) }
+  var showDshPicker by remember { mutableStateOf(false) }
+  // 选择变更后强制重组（prefs 属性非 State）
+  var selectionEpoch by remember { mutableStateOf(0) }
+  val distro = remember(selectionEpoch) { viewModel.distro }
 
   Column(
     Modifier
@@ -143,9 +153,25 @@ fun SettingsScreen(
     // —— 版本管理 ——
     SectionCard("版本管理") {
       DetailLine("应用版本", BuildConfig.VERSION_NAME)
-      DetailLine("Ubuntu", "${Paths.UBUNTU_RELEASE} LTS（Resolute Raccoon）")
-      DetailLine("Node.js", Paths.NODE_VERSION)
-      DetailLine("Harness", "dsh ${Paths.DSH_VERSION}")
+      RuntimePickersRow(
+        title = "容器系统",
+        value = distro.display,
+      ) { showDistroPicker = true }
+      RuntimePickersRow(
+        title = "Node.js",
+        value = if (distro.family == io.github.masgzy.dshm.engine.DistroFamily.ALPINE) "随 apk（容器内安装）" else viewModel.nodeVersion,
+      ) { showNodePicker = true }
+      RuntimePickersRow(
+        title = "dsh（Harness）",
+        value = if (viewModel.dshVersion.isBlank()) "跟随 npm latest" else viewModel.dshVersion,
+      ) { showDshPicker = true }
+      Text(
+        "切换后需「重置运行环境」并重新安装生效（工作区文件保留）；" +
+          "预装运行时 bundle 仅提供 Ubuntu 26.04 组合。",
+        fontSize = 11.5.sp,
+        lineHeight = 16.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
     }
 
     // —— 关于 ——
@@ -211,7 +237,7 @@ fun SettingsScreen(
     DshmDialog(
       onDismiss = { confirmUninstall = false },
       title = "重置运行环境？",
-      message = "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
+      message = "将删除容器、Node.js 与 dsh 全部数据" +
         "（/root/projects 工作区文件保留）。下次使用需重新安装。",
       icon = Icons.Outlined.RestoreFromTrash,
       danger = true,
@@ -221,6 +247,26 @@ fun SettingsScreen(
         viewModel.uninstallRuntime()
       },
     )
+  }
+
+  // 容器系统 / 版本选择器
+  if (showDistroPicker) {
+    DistroPickerDialog(viewModel) {
+      showDistroPicker = false
+      selectionEpoch++
+    }
+  }
+  if (showNodePicker) {
+    NodeVersionPickerDialog(viewModel) {
+      showNodePicker = false
+      selectionEpoch++
+    }
+  }
+  if (showDshPicker) {
+    DshVersionPickerDialog(viewModel) {
+      showDshPicker = false
+      selectionEpoch++
+    }
   }
 }
 
