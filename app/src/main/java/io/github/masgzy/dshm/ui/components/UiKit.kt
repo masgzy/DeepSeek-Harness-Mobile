@@ -709,6 +709,8 @@ fun DshmDialog(
   danger: Boolean = false,
   confirmEnabled: Boolean = true,
   dismissLabel: String? = "取消",
+  /** 左键（非取消文案时）的独立回调；null 时左键等同关闭。用于“清除 Key”类反向操作。 */
+  onDismissConfirm: (() -> Unit)? = null,
   content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {},
 ) {
   val p = LocalDshmPalette.current
@@ -792,7 +794,7 @@ fun DshmDialog(
         ) {
           if (dismissLabel != null) {
             BaseButton(
-              dismissLabel, onDismiss, Modifier.weight(1f),
+              dismissLabel, onDismissConfirm ?: onDismiss, Modifier.weight(1f),
               container = MaterialTheme.colorScheme.surface,
               content = p.muted,
               border = p.lineStrong,
