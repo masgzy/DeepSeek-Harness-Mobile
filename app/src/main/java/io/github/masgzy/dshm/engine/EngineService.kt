@@ -49,7 +49,12 @@ class EngineService : Service() {
     watchdog = null
     ensureRunner?.shutdownNow()
     ensureRunner = null
-    engineManager.stopEngine()
+    // 主线程绝不阻塞等待进程树退出：proot 收 SIGTERM 后清理容器内子进程可达 10s+，
+    // 同步 stopEngine 会 ANR（卡死十来秒后闪退）。挪到后台线程执行。
+    val em = engineManager
+    Thread({
+      runCatching { em.stopEngine() }
+    }, "engine-stop").start()
     super.onDestroy()
   }
 

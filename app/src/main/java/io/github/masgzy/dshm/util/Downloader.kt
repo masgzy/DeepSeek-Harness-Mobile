@@ -9,7 +9,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicLongArray
 
 /**
  * 多镜像回退 + 多线程分段并行下载器。
@@ -38,31 +38,34 @@ object Downloader {
   /**
    * 依次尝试 [mirrors]，成功（下载完成 + SHA-256 校验通过）即返回。
    * @param expectedSha256 为 null 时跳过校验。
+   * @param onLog 失败/校验详情上屏回调（安装日志区可见，便于远端诊断）。
    * @throws IOException 全部镜像均失败。
    */
   fun download(
     mirrors: List<String>,
     dest: File,
     expectedSha256: String?,
+    onLog: (String) -> Unit = {},
     onProgress: (done: Long, total: Long) -> Unit = { _, _ -> },
   ): File {
     require(mirrors.isNotEmpty()) { "镜像列表为空" }
     var lastError: Exception? = null
     for (url in mirrors) {
       try {
-        AppLog.log("downloader", "尝试镜像: $url")
+        onLog("下载尝试: ${shorten(url)}")
         fetch(url, dest, onProgress)
         if (expectedSha256 != null) {
           val actual = Hashing.sha256Hex(dest)
             ?: throw IOException("SHA-256 计算失败: ${dest.name}")
           if (!Hashing.equalsHex(expectedSha256, actual)) {
-            throw IOException("SHA-256 不匹配: $url 期望=$expectedSha256 实际=$actual")
+            throw IOException("SHA-256 校验失败（下载内容不完整？）")
           }
-          AppLog.log("downloader", "校验通过: ${dest.name}")
+          onLog("SHA-256 校验通过: ${dest.name}")
         }
         return dest
       } catch (e: Exception) {
         AppLog.log("downloader", "镜像失败: $url", e)
+        onLog("镜像失败: ${shorten(url)} — ${e.message}")
         lastError = e
         dest.delete()
         dest.parentFile?.listFiles { f -> f.name.startsWith("${dest.name}.seg") }?.forEach { it.delete() }
@@ -70,6 +73,14 @@ object Downloader {
     }
     throw IOException("所有镜像均下载失败（最后一个错误: ${lastError?.message}）", lastError)
   }
+
+  /** 日志区友好化 URL（去 scheme，保留主机 + 文件名）。 */
+  private fun shorten(url: String): String =
+    url.removePrefix("https://").removePrefix("http://").let {
+      val host = it.substringBefore('/')
+      val file = it.substringAfterLast('/')
+      if (file.isNotBlank()) "$host/…/$file" else host
+    }
 
   /** 小体积整体读取（lxc-images simplestreams 索引等元数据）。 */
   fun fetchBytes(url: String): ByteArray {
@@ -139,15 +150,21 @@ object Downloader {
     val segSize = (total + segments - 1) / segments
     AppLog.log("downloader", "并行分段下载: $segments 段 × ~${segSize / 1024}KB (total=$total)")
 
-    val done = AtomicLong(0L)
+    // 每段独立累计，报告时求和 —— 修复旧实现「各段 set 覆盖全局值」导致的进度条抽搐
+    val segProgress = AtomicLongArray(segments)
     var lastReport = 0L
     val progressLock = Any()
+    fun sum(): Long {
+      var s = 0L
+      for (i in 0 until segments) s += segProgress.get(i)
+      return s
+    }
     fun report() {
       val now = System.currentTimeMillis()
       synchronized(progressLock) {
-        if (now - lastReport > 120) {
+        if (now - lastReport > 150) {
           lastReport = now
-          onProgress(done.get(), total)
+          onProgress(sum(), total)
         }
       }
     }
@@ -162,11 +179,9 @@ object Downloader {
         futures.add(pool.submit(Callable {
           var attempt = 0
           while (true) {
-            val segDone = AtomicLong(0L)
             try {
               fetchSegment(url, dest, start, end) { n ->
-                val d = segDone.addAndGet(n.toLong())
-                done.set(start + d)
+                segProgress.addAndGet(i, n.toLong())
                 report()
               }
               return@Callable true
@@ -174,7 +189,7 @@ object Downloader {
               attempt++
               AppLog.log("downloader", "分段 $i 第 $attempt 次失败: ${e.message}")
               if (attempt > SEGMENT_RETRIES) return@Callable false
-              // 重试：整段重写（并发分段无共享进度，文件长度不能作为续传依据）
+              segProgress.set(i, 0L) // 重试：该段进度归零整段重写（并发分段无共享续传依据）
             }
           }
           false
