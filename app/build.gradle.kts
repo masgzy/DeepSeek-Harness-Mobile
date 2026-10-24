@@ -21,8 +21,8 @@ android {
     // jniLibs/nativeLibraryDir 方案绕开（见 ProotRuntime 类注释），
     // targetSdk 不再约束 exec 能力；升级 35+ 前需评估前台服务类型。
     targetSdk = 34
-    versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 2
-    versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-alpha.2"
+    versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 3
+    versionName = (project.findProperty("versionName") as String?) ?: "1.0.0-alpha.3"
 
     // 单一运行时：只支持 arm64-v8a（2019 年后的主流设备全覆盖）
     ndk { abiFilters += "arm64-v8a" }
