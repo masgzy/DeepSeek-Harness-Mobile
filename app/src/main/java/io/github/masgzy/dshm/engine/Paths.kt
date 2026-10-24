@@ -40,7 +40,7 @@ object Paths {
 
   // ---- 目录布局 ----
   const val ROOTFS_DIR = "rootfs"
-  const val PROOT_DIR = "proot"
+  const val PROOT_TMP_DIR = "proot-tmp" // proot 自身临时目录（cacheDir 下）
   const val CACHE_DIR = "cache"
   const val LOGS_DIR = "logs"
 

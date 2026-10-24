@@ -25,8 +25,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import io.github.masgzy.dshm.BuildConfig
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.ui.AppViewModel
+import io.github.masgzy.dshm.util.AppLog
 
 /**
  * 设置页：端口、npm 源、容器管理、关于与许可证。
@@ -98,7 +100,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
     Card(Modifier.fillMaxWidth()) {
       Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("关于", style = MaterialTheme.typography.titleSmall)
-        Text("DeepSeek Harness Mobile 1.0.0-alpha.1")
+        Text("DeepSeek Harness Mobile ${BuildConfig.VERSION_NAME}")
         Text(
           "Ubuntu ${Paths.UBUNTU_RELEASE} · Node.js ${Paths.NODE_VERSION} · dsh ${Paths.DSH_VERSION}",
           style = MaterialTheme.typography.bodySmall,
@@ -110,6 +112,13 @@ fun SettingsScreen(viewModel: AppViewModel) {
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (AppLog.crashLogFile.isFile) {
+          Text(
+            "检测到崩溃记录（crash.log），反馈问题时请附上「日志 → 应用」页内容。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+          )
+        }
       }
     }
   }

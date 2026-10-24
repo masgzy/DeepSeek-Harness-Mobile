@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +28,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import io.github.masgzy.dshm.engine.EngineProbe
-import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.ui.AppViewModel
+import io.github.masgzy.dshm.ui.components.Phases
+import io.github.masgzy.dshm.ui.components.StatusBadge
 import kotlinx.coroutines.delay
 
 /**
  * 主界面：dsh 官方 Web UI（WebView 加载 127.0.0.1:3080）+ 引擎控制。
+ *
+ * 引擎状态探测全部走 viewModel（Dispatchers.IO）：HttpURLConnection 在主线程
+ * 会抛 NetworkOnMainThreadException，v1.0.0-alpha.1 的轮询把它静默吞掉，
+ * 导致「引擎被看门狗拉起后界面永不恢复」。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -54,10 +57,17 @@ fun HomeScreen(viewModel: AppViewModel) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        AssistChip(
-          onClick = {},
-          label = { Text("引擎运行中 · 127.0.0.1:${viewModel.port}") },
-        )
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          StatusBadge(Phases.RUNNING)
+          Text(
+            "127.0.0.1:${viewModel.port}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
         OutlinedButton(onClick = { viewModel.stopEngine() }) { Text("停止") }
       }
       AndroidView(
@@ -68,7 +78,7 @@ fun HomeScreen(viewModel: AppViewModel) {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             webViewClient = WebViewClient()
-            loadUrl("http://127.0.0.1:${Paths.DSH_PORT}/")
+            loadUrl("http://127.0.0.1:${viewModel.port}/")
           }.also { webView = it }
         },
         modifier = Modifier.fillMaxSize(),
@@ -89,6 +99,7 @@ fun HomeScreen(viewModel: AppViewModel) {
           verticalArrangement = Arrangement.spacedBy(12.dp),
           horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+          StatusBadge(Phases.READY)
           Text("引擎未运行", style = MaterialTheme.typography.titleLarge)
           Text(
             "启动后将在本机 proot 容器内运行 DeepSeek Harness Web UI。" +
@@ -109,11 +120,11 @@ fun HomeScreen(viewModel: AppViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }
-    // 周期探测：引擎在后台被看门狗拉起后，界面自动恢复
+    // 周期探测（IO 线程）：引擎在后台被看门狗拉起后，界面自动恢复
     LaunchedEffect(Unit) {
       while (true) {
         delay(3_000)
-        if (EngineProbe.check(viewModel.port)) viewModel.refreshEngineState()
+        viewModel.refreshEngineState()
       }
     }
   }
