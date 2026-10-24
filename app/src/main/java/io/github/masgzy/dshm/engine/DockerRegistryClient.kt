@@ -83,7 +83,7 @@ class DockerRegistryClient(
       // Docker Hub 短名补 library/
       var repo = s
       if (registry == "registry-1.docker.io" && !repo.contains('/')) repo = "library/$repo"
-      require(repo.none { seg -> seg.isEmpty() }) { "非法镜像名: $s" }
+      require(repo.split('/').none { it.isEmpty() }) { "非法镜像名: $s" }
       return ImageRef(registry, repo, tag, digest)
     }
 
@@ -166,9 +166,11 @@ class DockerRegistryClient(
     val index = JSONObject(String(indexBytes, Charsets.UTF_8))
     val manifest: JSONObject = if (isIndex(index)) {
       val child = pickArm64(index, arch)
-      onLog("多架构索引 → arm64 子 manifest ${child.digest.take(20)}…")
-      val childBytes = if (child.digest == ref.digest) indexBytes
-      else session.getJson("/v2/${ref.repo}/manifests/${child.digest}", ACCEPT_CHILD)
+      val childDigest = child.optString("digest")
+      if (childDigest.isBlank()) throw IOException("index 子 manifest 缺少 digest")
+      onLog("多架构索引 → arm64 子 manifest ${childDigest.take(20)}…")
+      val childBytes = if (childDigest == ref.digest) indexBytes
+      else session.getJson("/v2/${ref.repo}/manifests/$childDigest", ACCEPT_CHILD)
       JSONObject(String(childBytes, Charsets.UTF_8))
     } else {
       index
