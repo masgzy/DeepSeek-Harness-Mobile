@@ -30,13 +30,21 @@ class UpdateManager(private val filesDir: File) {
   /** 拉取最新运行时清单（默认指向本仓库 runtime-nightly 预发布）。 */
   fun fetchManifest(manifestUrl: String = DEFAULT_MANIFEST_URL): Manifest {
     val text = httpGet(manifestUrl)
-    val json = JSONObject(text)
-    val bundle = json.getJSONObject("bundle")
-    val runtime = json.getJSONObject("runtime")
+    if (text.length > MAX_MANIFEST_CHARS) {
+      throw RuntimeException("运行时清单异常（超过 ${MAX_MANIFEST_CHARS / 1024}KB），源可能被劫持")
+    }
+    val json = try {
+      JSONObject(text)
+    } catch (t: Throwable) {
+      throw RuntimeException("运行时清单解析失败（源返回的不是有效 JSON）", t)
+    }
+    val bundle = json.optJSONObject("bundle")
+      ?: throw RuntimeException("运行时清单缺少 bundle 字段")
+    val runtime = json.optJSONObject("runtime") ?: JSONObject()
     return Manifest(
-      version = bundle.getString("version"),
-      url = bundle.getString("url"),
-      sha256 = bundle.getString("sha256"),
+      version = bundle.optString("version", "unknown"),
+      url = bundle.optString("url", "").ifBlank { throw RuntimeException("运行时清单缺少下载地址") },
+      sha256 = bundle.optString("sha256", "").ifBlank { throw RuntimeException("运行时清单缺少 SHA-256，拒绝下载") },
       bytes = bundle.optLong("bytes", -1L),
       ubuntu = runtime.optString("ubuntu", ""),
       node = runtime.optString("node", ""),
@@ -105,6 +113,9 @@ class UpdateManager(private val filesDir: File) {
   }
 
   companion object {
+    /** 清单体积上限：正常清单是几 KB 的 JSON，超过必是异常内容（防 OOM/劫持）。 */
+    private const val MAX_MANIFEST_CHARS = 256 * 1024
+
     /** runtime.yml 会把 manifest.json 发布到 runtime-nightly 预发布的资产里。 */
     const val DEFAULT_MANIFEST_URL =
       "https://github.com/masgzy/DeepSeek-Harness-Mobile/releases/download/runtime-nightly/manifest.json"

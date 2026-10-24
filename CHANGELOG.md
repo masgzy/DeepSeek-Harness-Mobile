@@ -15,6 +15,48 @@
 - API Key Android Keystore 加密存储
 - 可选 Shizuku 集成（设备 shell 能力扩展）
 
+## [1.0.0-alpha.2] - 2026-10-24
+
+修复 alpha.1 在真机上的关键启动缺陷（proot 无法执行）与若干体验问题。
+**需要先卸载 alpha.1 再安装本版**（签名密钥切换为固定社区密钥，此后版本可覆盖安装）。
+
+### 修复
+
+- **proot 无法执行（error=13）**：Android 10 起 targetSdk ≥ 29 的应用被
+  SELinux W^X 策略禁止 exec 应用数据目录 ELF，alpha.1 的「assets 解压到
+  filesDir 再执行」方案在真机必然失败。参照
+  dphmoblie/deepseek-harness-android 的成熟实现，改为 **jniLibs 方案**：
+  proot 本体与静态 loader 以 `libdsh_proot.so` /
+  `libdsh_proot_loader.so` 随 APK 分发，经 `nativeLibraryDir` 执行；
+  访客 execve 经 `PROOT_LOADER` 以 mmap 装载，应用数据目录内不再发生
+  execve（targetSdk 34 行为与限制详见 docs/architecture.md §2.2）；
+- **CI 期二进制供给**：`fetch-proot.sh` 重写为产出 jniLibs 四件套
+  （本体 / loader / libtalloc 重命名 / libandroid-shmem），并对 proot
+  本体做 DT_NEEDED 同长度补丁（`libtalloc.so.2` → `libtalloc.so`）；
+  Termux proot 升级至 5.1.107.100（旧版本已从源池清除）；
+- **预装运行时通道健壮性**：清单拉取增加体积上限与字段级校验
+  （缺失 SHA-256 时明确拒绝）；错误文案携带完整原因链；
+- **引擎状态探测**：修复 HomeScreen 周期探测在主线程执行网络 I/O 被
+  静默吞掉的问题（引擎被看门狗拉起后界面此前永不自动恢复）；
+- **CI 分支过滤**：修复 push 触发条件（alpha.1 的 CI 实际未在 main 推送时运行）。
+
+### 新增
+
+- 全局崩溃处理器：未捕获异常完整堆栈写入 `logs/crash.log`，
+  设置页检测到崩溃记录时提示用户反馈；日志页支持一键复制；
+- 安装向导对齐参考项目：阶段状态徽章（未安装/下载中/正在校验/正在安装/
+  已就绪/需要处理）、失败后「重试在线安装 / 改用预装运行时」双通道；
+- **固定社区签名密钥**：仓库内置 `release.keystore`（alpha 阶段公开），
+  预发布版本间可覆盖安装升级；配置 `RELEASE_KEYSTORE_B64` Secret 后自动切换。
+
+### 变更
+
+- UI 阶段文案与状态色对齐 dphmoblie/deepseek-harness-android（phase 色系）；
+- 引擎宿主环境对齐参考实现：`PROOT_LOADER` / `LD_LIBRARY_PATH` /
+  `PROOT_TMP_DIR` / `TMPDIR`，容器内 `env -i` 增加 USER/LOGNAME/LANG/SHELL；
+- 容器绑定补充 `/apex` 与 `/linkerconfig/ld.config.txt`（Android 10+
+  系统组件路径，termux-chroot 同款）。
+
 ## [1.0.0-alpha.1] - 2026-10-24
 
 首个开发者预览版本（项目框架落地）。

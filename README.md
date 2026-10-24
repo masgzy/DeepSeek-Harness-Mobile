@@ -148,8 +148,8 @@ OUT=runtime/out ./runtime/build-rootfs.sh
 | 项目 | 说明 |
 | --- | --- |
 | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | dsh 本体（MIT） |
-| [dphmoblie/deepseek-harness-android](https://github.com/dphmoblie/deepseek-harness-android) | 运行时管理与合规设计的最重要参考 |
-| [deepcode-lab/deepseek-harness-mobile](https://github.com/deepcode-lab/deepseek-harness-mobile) | proot assets 方案与引擎保活参考 |
+| [dphmoblie/deepseek-harness-android](https://github.com/dphmoblie/deepseek-harness-android) | 最重要参考：jniLibs/proot 执行方案、PROOT_LOADER 机制、UI 与合规设计 |
+| [deepcode-lab/deepseek-harness-mobile](https://github.com/deepcode-lab/deepseek-harness-mobile) | 引擎保活与 CI 签名参考 |
 | [duke5am/deepseek-harness-on-android](https://github.com/duke5am/deepseek-harness-on-android) | Termux + proot-distro 安装路径验证 |
 | [thness/dsh-mobile](https://github.com/thness/dsh-mobile) | 内嵌 Node.js 方案参考 |
 | [Termux](https://github.com/termux/termux-packages) | proot / libtalloc / libandroid-shmem 构建 |

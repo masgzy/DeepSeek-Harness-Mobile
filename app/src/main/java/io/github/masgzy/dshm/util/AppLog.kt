@@ -19,6 +19,10 @@ object AppLog {
     File(contextDir(), "logs/app.log").apply { parentFile?.mkdirs() }
   }
 
+  /** 崩溃现场文件（由全局异常处理器写入；存在即代表进程发生过未捕获崩溃）。 */
+  val crashLogFile: File
+    get() = File(contextDir(), "logs/crash.log")
+
   // 在依赖注入就位前用懒加载兜底：由 App 在 onCreate 里注入 filesDir。
   @Volatile
   private var baseDir: File? = null

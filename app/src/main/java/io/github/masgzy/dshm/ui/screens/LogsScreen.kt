@@ -57,10 +57,24 @@ fun LogsScreen(baseDir: File) {
 
   Scaffold(
     topBar = {
+      val context = androidx.compose.ui.platform.LocalContext.current
       TopAppBar(
         title = { Text("日志") },
         actions = {
           Row(Modifier.padding(end = 8.dp)) {
+            OutlinedButton(
+              onClick = {
+                if (lines.isNotEmpty()) {
+                  // 平台剪贴板 API：不依赖 Compose 剪贴板封装的版本演进
+                  val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                  cm.setPrimaryClip(
+                    android.content.ClipData.newPlainText("dshm-log", lines.joinToString("\n")),
+                  )
+                }
+              },
+              enabled = lines.isNotEmpty(),
+            ) { Text("复制") }
             OutlinedButton(onClick = { tab = 0 }) {
               Text(
                 "引擎",

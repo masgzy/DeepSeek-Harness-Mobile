@@ -43,8 +43,8 @@ class EngineManager(private val context: Context) {
       AppLog.log("engine", "引擎未就绪（rootfs/dsh 缺失）")
       return false
     }
-    if (!prootRuntime.ensureProot()) {
-      AppLog.log("engine", "proot 运行时缺失")
+    if (!prootRuntime.runnerAvailable()) {
+      AppLog.log("engine", "proot 运行器缺失（nativeLibraryDir 无 libdsh_proot.so/libdsh_proot_loader.so）")
       return false
     }
     val workspace = Paths.workspace(context.filesDir).apply { mkdirs() }
