@@ -5,9 +5,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.masgzy.dshm.engine.Distro
+import io.github.masgzy.dshm.engine.DistroCatalog
+import io.github.masgzy.dshm.engine.DshCatalog
 import io.github.masgzy.dshm.engine.EngineManager
 import io.github.masgzy.dshm.engine.EngineService
 import io.github.masgzy.dshm.engine.ModelConfigManager
+import io.github.masgzy.dshm.engine.NodeCatalog
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.engine.PluginManager
 import io.github.masgzy.dshm.engine.RootfsManager
@@ -67,6 +71,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   var npmRegistry: String
     get() = prefs.getString("npm_registry", Paths.NPM_REGISTRY_CN) ?: Paths.NPM_REGISTRY_CN
     set(value) = prefs.edit().putString("npm_registry", value).apply()
+
+  // ---- 容器系统与运行时版本选择 ----
+  /** 容器系统 ID（DistroCatalog）或 DistroCatalog.CUSTOM_ID。 */
+  var distroId: String
+    get() = prefs.getString("distro_id", DistroCatalog.DEFAULT.id) ?: DistroCatalog.DEFAULT.id
+    set(value) = prefs.edit().putString("distro_id", value).apply()
+
+  /** 自定义镜像引用（distroId == custom 时生效）。 */
+  var customImageRef: String
+    get() = prefs.getString("distro_custom_ref", "") ?: ""
+    set(value) = prefs.edit().putString("distro_custom_ref", value.trim()).apply()
+
+  /** Node.js 版本（"v24.22.0"；Alpine 族忽略）。 */
+  var nodeVersion: String
+    get() = prefs.getString("node_version", Paths.NODE_VERSION) ?: Paths.NODE_VERSION
+    set(value) = prefs.edit().putString("node_version", value).apply()
+
+  /** dsh 版本；空串 = npm latest。 */
+  var dshVersion: String
+    get() = prefs.getString("dsh_version", Paths.DSH_VERSION) ?: Paths.DSH_VERSION
+    set(value) = prefs.edit().putString("dsh_version", value).apply()
+
+  /** 当前生效的容器系统（含自定义引用解析）。 */
+  val distro: Distro get() = DistroCatalog.resolve(distroId, customImageRef)
+
+  /** Node.js 拉取失败/离线时的本地候选（常用 LTS）。 */
+  val nodeFallbackVersions: List<String> = listOf(
+    "v24.22.0", "v24.22.1", "v22.21.1", "v22.14.0", "v20.19.0",
+  )
+
+  /** dsh 拉取失败/离线时的本地候选。 */
+  val dshFallbackVersions: List<String> = listOf(
+    Paths.DSH_VERSION, "0.2.1-rc.3", "0.2.1-rc.1", "0.2.1-alpha.5",
+  )
+
+  /** 远端 Node.js 版本目录（IO 线程；失败抛出，调用方自行降级）。 */
+  suspend fun fetchNodeVersions(): List<NodeCatalog.Entry> =
+    withContext(Dispatchers.IO) { NodeCatalog.list() }
+
+  /** 远端 dsh 版本目录（registry 跟随设置页 npm 源）。 */
+  suspend fun fetchDshVersions(): List<DshCatalog.Entry> =
+    withContext(Dispatchers.IO) { DshCatalog.list(npmRegistry) }
 
   // ---- 引擎控制 ----
   fun startEngine(onDone: ((ok: Boolean) -> Unit)? = null) {
@@ -143,17 +189,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
   }
 
-  // ---- 安装向导：官方 rootfs + 在线 bootstrap ----
+  // ---- 安装向导：官方 rootfs + 在线 bootstrap（发行版/版本可选） ----
   fun installOfficial() {
     if (_setup.value.running) return
+    val distro = this.distro
+    val nodeVersion = this.nodeVersion
+    val dshVersion = this.dshVersion
     viewModelScope.launch(Dispatchers.IO) {
       _setup.value = SetupState(running = true, step = "准备安装")
       try {
-        rootfsManager.install { step, done, total ->
-          updateProgress(step, done, total)
-        }
+        rootfsManager.install(
+          distro,
+          onProgress = { step, done, total -> updateProgress(step, done, total) },
+          onLog = { line -> appendLog(line) },
+        )
         runtimeInstaller.install(
+          distro = distro,
           npmRegistry = npmRegistry,
+          nodeVersion = nodeVersion,
+          dshVersion = dshVersion,
           onProgress = { step, done, total -> updateProgress(step, done, total) },
           onLog = { line -> appendLog(line) },
         )
