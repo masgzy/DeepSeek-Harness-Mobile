@@ -3,6 +3,7 @@ package io.github.masgzy.dshm.engine
 import android.content.Context
 import io.github.masgzy.dshm.util.AppLog
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -107,6 +108,9 @@ class EngineManager(private val context: Context) {
       "DSH_HOME=/root/.dsh",
       "DSH_PICK_DISABLE_UPDATE_CHECK=1",
       "NODE_OPTIONS=--max-old-space-size=512",
+      // Node 22+ V8 编译缓存：二次启动免重复解析 dsh 依赖树（proot 下 stat/open
+      // 翻译开销大，冷启动 10-30s；缓存命中后明显提速）。bootstrap 已预热首份缓存。
+      "NODE_COMPILE_CACHE=/root/.dshm/compile-cache",
       "NO_COLOR=1", // dsh 输出禁用 ANSI 颜色，保证 URL 正则稳定匹配
     )
     val argv = prootRuntime.buildArgs(
@@ -151,16 +155,29 @@ class EngineManager(private val context: Context) {
     }
   }
 
-  /** 停止引擎（--kill-on-exit 会连带清理容器内子进程）。 */
+  /**
+   * 停止引擎：SIGTERM 给 proot 5s 优雅退出（--kill-on-exit 连带清理容器内子进程），
+   * 超时则 SIGKILL 强杀（再给 2s）。旧实现 waitFor() 无限等待，proot 清理慢时
+   * 调用线程（含 EngineService.onDestroy 的主线程路径）被拖住十秒以上 → ANR 闪退。
+   */
   @Synchronized
   fun stopEngine() {
+    val proc = current
+    if (proc == null) {
+      webUrl.value = null
+      return
+    }
     try {
-      current?.destroy()
-      current?.waitFor()
+      proc.destroy()
+      if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+        AppLog.log("engine", "SIGTERM 5s 未退出，SIGKILL 强制结束")
+        proc.destroyForcibly()
+        proc.waitFor(2, TimeUnit.SECONDS)
+      }
       AppLog.log("engine", "引擎已停止")
     } catch (t: Throwable) {
       AppLog.log("engine", "停止引擎异常", t)
-      current?.destroyForcibly()
+      runCatching { proc.destroyForcibly() }
     } finally {
       current = null
       webUrl.value = null

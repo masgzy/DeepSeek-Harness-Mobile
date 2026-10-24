@@ -37,11 +37,19 @@ object NodeCatalog {
   /** tarball 文件名（linux-arm64 glibc 构建）。 */
   fun tarballName(version: String): String = "node-$version-linux-arm64.tar.gz"
 
-  /** tarball 下载镜像列表（官方 + npmmirror）。 */
-  fun tarballMirrors(version: String): List<String> = listOf(
-    "https://nodejs.org/dist/$version/${tarballName(version)}",
-    "https://npmmirror.com/mirrors/node/$version/${tarballName(version)}",
-  )
+  /**
+   * tarball 下载镜像列表。npm 源选国内时国内镜像优先（npmmirror 阿里 CDN +
+   * 华为云），官方 nodejs.org 垫底 —— 官方站在大陆单流常压到几十 KB/s，
+   * 放在首位会让慢速成功据占回退链、国内 CDN 永远轮不上。
+   */
+  fun tarballMirrors(version: String, preferCn: Boolean = false): List<String> {
+    val official = "https://nodejs.org/dist/$version/${tarballName(version)}"
+    val cn = listOf(
+      "https://npmmirror.com/mirrors/node/$version/${tarballName(version)}",
+      "https://mirrors.huaweicloud.com/nodejs/$version/${tarballName(version)}",
+    )
+    return if (preferCn) cn + official else listOf(official) + cn
+  }
 
   /**
    * 拉取 SHASUMS256.txt 并取 linux-arm64 tarball 行的哈希。

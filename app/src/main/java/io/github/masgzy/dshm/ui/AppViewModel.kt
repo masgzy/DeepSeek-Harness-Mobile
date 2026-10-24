@@ -14,6 +14,7 @@ import io.github.masgzy.dshm.engine.EngineService
 import io.github.masgzy.dshm.engine.ModelConfigManager
 import io.github.masgzy.dshm.engine.NodeCatalog
 import io.github.masgzy.dshm.engine.Paths
+import io.github.masgzy.dshm.engine.EngineProbe
 import io.github.masgzy.dshm.engine.PluginManager
 import io.github.masgzy.dshm.engine.RootfsManager
 import io.github.masgzy.dshm.engine.RuntimeInstaller
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 全局安装进度状态。 */
 data class SetupState(
@@ -234,9 +236,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   /**
    * 从引擎日志尾部解析带 token 的 webUrl（engine.log 为追加式，尾部即最新会话）。
    * 引擎重启换新 token 后，新地址打印在日志更靠后的位置，解析结果自然更新。
+   *
+   * 解析结果必须经 [EngineProbe.checkUrl] 活性验证后才发布：APP 重启后附着到
+   * 存活引擎时，日志尾部可能是上一轮会话的过期 token（401 refused 的根源），
+   * 直接采用会让 WebView 撞凭据错误页。验证含本机网络 I/O，全程 IO 线程。
    */
+  private val urlVerifyInFlight = AtomicBoolean(false)
+
   fun resolveWebUrlFromLog() {
-    EngineManager.webUrlFromLog(engineManager.engineLog)?.let { EngineManager.webUrl.value = it }
+    // 去重：轮询/启动等待/手动点击可能并发触发，一次只跑一个验证
+    if (!urlVerifyInFlight.compareAndSet(false, true)) return
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val candidate = EngineManager.webUrlFromLog(engineManager.engineLog)
+        if (candidate == null || candidate == EngineManager.webUrl.value) return@launch
+        if (EngineProbe.checkUrl(candidate)) {
+          EngineManager.webUrl.value = candidate
+          AppLog.log("vm", "日志尾部 URL 验证通过，凭据就绪")
+        } else {
+          AppLog.log("vm", "日志尾部 URL 凭据已失效（401/不可达），等待引擎打印新地址")
+        }
+      } finally {
+        urlVerifyInFlight.set(false)
+      }
+    }
   }
 
   /** 重置运行环境：停服务与引擎、删除 rootfs 与缓存、复位安装状态。 */
@@ -262,9 +285,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun refreshEngineState() {
-    // 探测含网络 I/O，必须离开主线程
+    // 探测含网络 I/O，必须离开主线程；发现引擎存活但凭据未就绪时顺带预热解析
     viewModelScope.launch(Dispatchers.IO) {
       val running = engineManager.isRunning
+      if (running && EngineManager.webUrl.value == null) resolveWebUrlFromLog()
       withContext(Dispatchers.Main) { _engineRunning.value = running }
     }
   }

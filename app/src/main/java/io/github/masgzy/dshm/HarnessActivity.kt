@@ -128,15 +128,23 @@ class HarnessActivity : ComponentActivity() {
     wv.loadUrl(lastLoaded ?: url)
   }
 
-  /** 401 自愈：从引擎日志尾部重新解析最新带 token 地址（EngineManager.webUrl 流会触发重载）。 */
+  /** 401 自愈：从引擎日志尾部重新解析最新带 token 地址。
+   *  解析结果先做活性验证（旧 token 401，直接加载只会再撞一次凭据页），
+   *  验证通过才重载；未通过则等待 EngineManager.webUrl 流（外壳侧验证后更新）。 */
   private fun reparseAndReload() {
     val logFile = io.github.masgzy.dshm.engine.Paths.engineLog(filesDir)
     val log = EngineManager.webUrlFromLog(logFile) ?: return
-    if (log != lastLoaded) {
-      lastLoaded = log
-      loadRetries = 0
-      webView?.loadUrl(log)
-    }
+    if (log == lastLoaded) return
+    Thread {
+      val ok = io.github.masgzy.dshm.engine.EngineProbe.checkUrl(log)
+      runOnUiThread {
+        if (ok && log != lastLoaded) {
+          lastLoaded = log
+          loadRetries = 0
+          webView?.loadUrl(log)
+        }
+      }
+    }.start()
   }
 
   override fun onDestroy() {
