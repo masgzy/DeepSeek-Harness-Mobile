@@ -15,6 +15,45 @@
 - API Key Android Keystore 加密存储
 - 可选 Shizuku 集成（设备 shell 能力扩展）
 
+## [1.0.0-alpha.3] - 2026-10-24
+
+修复 dsh web 认证失败（Web UI 无法进入），界面整体对齐
+dphmoblie/deepseek-harness-android。可从 alpha.2 覆盖安装。
+
+### 修复
+
+- **dsh web 认证失败（401）**：dsh web 每次启动生成随机 token（43 位
+  base64url）且只打印在 stdout（`dsh web: http://127.0.0.1:3080/?token=…`），
+  不带 token 访问一律得到
+  `dsh web authentication required; reopen the URL printed by dsh web.`
+  alpha.2 的 WebView 加载的是不带 token 的裸地址，必然被拒。现改为
+  引擎进程以管道逐行读取 stdout，实时落盘 engine.log 并解析带 token 的
+  完整地址；WebView 只加载该地址，token 未就绪前显示「正在获取访问凭据」；
+- **连接时序**：修复「先 connect refused 后认证失败」——token 解析完成
+  （而非端口首次应答）才进入 WebView；引擎打印地址与端口监听间的短暂窗口
+  由 WebView 延迟自动重试兜底；
+- **token 轮换自愈**：引擎被看门狗重启后 token 更换，WebView 收到 401 时
+  自动从引擎日志尾部重新解析最新地址并重载（APP 重启后重新附着到
+  仍在运行的引擎同样走日志尾部解析）。
+
+### 变更
+
+- **界面整体重做**（逐项对齐 dphmoblie/deepseek-harness-android 外壳）：
+  - 主题：深浅双套固定色板照搬参考项目 styles.css（深色底 `#0f1317`/
+    卡片 `#171d24`/海洋蓝 `#86abff` 等），不再使用 Material You 动态取色；
+  - 外壳：顶栏（品牌 + 全局阶段徽章）+ 底部三项导航（首页 / 环境 / 设置）；
+  - 阶段徽章 PhaseBadge：软色底 + 描边 + 呼吸圆点，五色系与参考项目一致；
+  - 首页对话门屏（conversation-gate）：eyebrow 标题、launch-panel 启动卡片、
+    主按钮/告警条形态逐项对齐；
+  - 环境屏（environment-screen）：安装引导与运行时管理一体，下载 → 校验 →
+    安装 → 就绪四步指示器、双安装路线、环境详情列表；
+  - 设置页：分组卡片 + 图标 + 说明 + 右箭头形态；日志页：终端深色面板 +
+    引擎/应用/崩溃三类切换 + 一键复制/清屏。
+
+### 修复（补充）
+
+- 环境屏周期探测改为 IO 线程轮询（3 秒），看门狗拉起/回收引擎后界面自动跟进。
+
 ## [1.0.0-alpha.2] - 2026-10-24
 
 修复 alpha.1 在真机上的关键启动缺陷（proot 无法执行）与若干体验问题。

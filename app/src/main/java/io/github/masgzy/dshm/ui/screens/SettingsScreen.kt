@@ -1,19 +1,30 @@
 package io.github.masgzy.dshm.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.RestoreFromTrash
+import androidx.compose.material.icons.outlined.ScrollText
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,124 +32,265 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.masgzy.dshm.BuildConfig
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.ui.AppViewModel
-import io.github.masgzy.dshm.util.AppLog
+import io.github.masgzy.dshm.ui.components.DangerQuietButton
+import io.github.masgzy.dshm.ui.components.InlineAlert
+import io.github.masgzy.dshm.ui.components.SectionCard
+import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 
 /**
- * 设置页：端口、npm 源、容器管理、关于与许可证。
+ * 设置页：对齐 dphmoblie/deepseek-harness-android 设置首页的分组卡片形态——
+ * 图标 + 标题 + 说明（hint）+ 右箭头；数值项行内展开编辑。
  */
 @Composable
-fun SettingsScreen(viewModel: AppViewModel) {
-  var portText by remember { mutableStateOf(viewModel.port.toString()) }
+fun SettingsScreen(viewModel: AppViewModel, onOpenLogs: () -> Unit) {
+  val p = LocalDshmPalette.current
+  var editingPort by rememberSaveable { mutableStateOf(false) }
+  var portDraft by rememberSaveable { mutableStateOf("") }
   var confirmUninstall by remember { mutableStateOf(false) }
 
   Column(
-    modifier = Modifier
+    Modifier
       .fillMaxSize()
       .verticalScroll(rememberScrollState())
-      .padding(16.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
+      .padding(horizontal = 20.dp)
+      .padding(bottom = 24.dp),
+    verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
-    Text("设置", style = MaterialTheme.typography.headlineSmall)
-
-    Card(Modifier.fillMaxWidth()) {
-      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Web UI 端口", style = MaterialTheme.typography.titleSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          OutlinedTextField(
-            value = portText,
-            onValueChange = { portText = it.filter(Char::isDigit).take(5) },
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-              keyboardType = KeyboardType.Number,
-            ),
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-          )
-          Button(onClick = {
-            portText.toIntOrNull()?.let { viewModel.port = it }
-          }) { Text("保存") }
-        }
+    // —— 通用 ——
+    SectionCard("通用") {
+      // 端口
+      SettingRow(
+        icon = Icons.Outlined.Dns,
+        title = "Web UI 端口",
+        hint = "dsh web 监听地址端口（默认 ${Paths.DSH_PORT}）",
+        value = viewModel.port.toString(),
+      ) {
+        portDraft = viewModel.port.toString()
+        editingPort = true
       }
-    }
-
-    Card(Modifier.fillMaxWidth()) {
-      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("npm 源（安装/更新 dsh 时使用）", style = MaterialTheme.typography.titleSmall)
+      // npm 源
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          "npm 源（安装 / 更新 dsh 时使用）",
+          fontSize = 14.sp,
+          fontWeight = FontWeight.Medium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           FilterChip(
             selected = viewModel.npmRegistry == Paths.NPM_REGISTRY_CN,
             onClick = { viewModel.npmRegistry = Paths.NPM_REGISTRY_CN },
             label = { Text("国内镜像") },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = p.blueSoft,
+              selectedLabelColor = p.blue,
+            ),
           )
           FilterChip(
             selected = viewModel.npmRegistry == Paths.NPM_REGISTRY_OFFICIAL,
             onClick = { viewModel.npmRegistry = Paths.NPM_REGISTRY_OFFICIAL },
             label = { Text("官方源") },
+            colors = FilterChipDefaults.filterChipColors(
+              selectedContainerColor = p.blueSoft,
+              selectedLabelColor = p.blue,
+            ),
           )
         }
       }
     }
 
-    Card(Modifier.fillMaxWidth()) {
-      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("容器管理", style = MaterialTheme.typography.titleSmall)
-        Text(
-          "卸载将删除容器 rootfs 与全部缓存（工作区文件保留）。下次使用需重新安装。",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // —— 日志与排查 ——
+    SectionCard("日志与排查") {
+      SettingRow(
+        icon = Icons.Outlined.ScrollText,
+        title = "引擎与应用日志",
+        hint = "引擎 stdout、应用运行日志与崩溃记录",
+        value = null,
+        onClick = onOpenLogs,
+      )
+      if (AppLog.crashLogFile.isFile) {
+        InlineAlert(
+          title = "检测到崩溃记录",
+          message = "crash.log 已生成，反馈问题时请到「日志与排查」复制崩溃内容一并提交。",
+          danger = true,
         )
-        OutlinedButton(onClick = { confirmUninstall = true }) { Text("卸载容器") }
       }
     }
 
-    Card(Modifier.fillMaxWidth()) {
-      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("关于", style = MaterialTheme.typography.titleSmall)
-        Text("DeepSeek Harness Mobile ${BuildConfig.VERSION_NAME}")
-        Text(
-          "Ubuntu ${Paths.UBUNTU_RELEASE} · Node.js ${Paths.NODE_VERSION} · dsh ${Paths.DSH_VERSION}",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-          "本项目基于 GPL-3.0 开源；第三方组件声明见仓库 THIRD_PARTY_NOTICES.md。" +
-            "DeepSeek Harness 为 DeepSeek 官方开源项目（developer preview）。",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (AppLog.crashLogFile.isFile) {
-          Text(
-            "检测到崩溃记录（crash.log），反馈问题时请附上「日志 → 应用」页内容。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-          )
-        }
-      }
+    // —— 版本管理 ——
+    SectionCard("版本管理") {
+      DetailLine("应用版本", BuildConfig.VERSION_NAME)
+      DetailLine("Ubuntu", "${Paths.UBUNTU_RELEASE} LTS（Resolute Raccoon）")
+      DetailLine("Node.js", Paths.NODE_VERSION)
+      DetailLine("Harness", "dsh ${Paths.DSH_VERSION}")
     }
+
+    // —— 关于 ——
+    SectionCard("关于") {
+      SettingRow(
+        icon = Icons.Outlined.Info,
+        title = "开源与许可",
+        hint = "GPL-3.0 开源；DeepSeek Harness 为 DeepSeek 官方开源项目（developer preview）",
+        value = null,
+      )
+      SettingRow(
+        icon = Icons.Outlined.Archive,
+        title = "第三方组件",
+        hint = "proot / libtalloc / libandroid-shmem / Node.js 等声明见仓库 THIRD_PARTY_NOTICES.md",
+        value = null,
+      )
+    }
+
+    // —— 容器管理 ——
+    SectionCard("容器管理") {
+      DangerQuietButton(
+        "重置运行环境",
+        { confirmUninstall = true },
+        Modifier.fillMaxWidth(),
+        icon = Icons.Outlined.RestoreFromTrash,
+      )
+      Text(
+        "卸载将删除容器 rootfs 与全部缓存（工作区文件保留）。下次使用需重新安装。",
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+
+    Spacer(Modifier.height(8.dp))
   }
 
+  // 端口编辑对话框
+  if (editingPort) {
+    AlertDialog(
+      onDismissRequest = { editingPort = false },
+      title = { Text("Web UI 端口") },
+      text = {
+        OutlinedTextField(
+          value = portDraft,
+          onValueChange = { portDraft = it.filter(Char::isDigit).take(5) },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          label = { Text("端口（1024-65535）") },
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = {
+          portDraft.toIntOrNull()?.let { viewModel.port = it }
+          editingPort = false
+        }) { Text("保存") }
+      },
+      dismissButton = {
+        TextButton(onClick = { editingPort = false }) { Text("取消") }
+      },
+    )
+  }
+
+  // 卸载确认
   if (confirmUninstall) {
     AlertDialog(
       onDismissRequest = { confirmUninstall = false },
-      title = { Text("卸载容器？") },
-      text = { Text("将删除 Ubuntu 容器、Node.js 与 dsh 全部数据（/root/projects 工作区文件保留）。") },
+      title = { Text("重置运行环境？") },
+      text = {
+        Text(
+          "将删除 Ubuntu 容器、Node.js 与 dsh 全部数据" +
+            "（/root/projects 工作区文件保留）。下次使用需重新安装。",
+        )
+      },
       confirmButton = {
         TextButton(onClick = {
           confirmUninstall = false
-          Thread {
-            viewModel.rootfsManager.uninstall()
-          }.start()
-        }) { Text("卸载") }
+          viewModel.uninstallRuntime()
+        }) { Text("重置") }
       },
       dismissButton = {
         TextButton(onClick = { confirmUninstall = false }) { Text("取消") }
       },
+    )
+  }
+}
+
+/** 设置行：图标 + 标题 + 说明（+ 右侧值/箭头），整行可点。 */
+@Composable
+private fun SettingRow(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  title: String,
+  hint: String,
+  value: String? = null,
+  onClick: (() -> Unit)? = null,
+) {
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+      .padding(vertical = 4.dp),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Icon(
+      icon,
+      null,
+      tint = LocalDshmPalette.current.muted,
+      modifier = Modifier.size(20.dp),
+    )
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(
+        title,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onSurface,
+      )
+      Text(
+        hint,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+    }
+    if (value != null) {
+      Text(
+        value,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = LocalDshmPalette.current.blue,
+      )
+    }
+    if (onClick != null) {
+      Icon(
+        Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+        null,
+        tint = LocalDshmPalette.current.muted,
+        modifier = Modifier.size(18.dp),
+      )
+    }
+  }
+}
+
+/** 键值行：版本管理/详情展示。 */
+@Composable
+private fun DetailLine(label: String, value: String) {
+  Row(
+    Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(label, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+    Text(
+      value,
+      fontSize = 13.5.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = MaterialTheme.colorScheme.onSurface,
     )
   }
 }

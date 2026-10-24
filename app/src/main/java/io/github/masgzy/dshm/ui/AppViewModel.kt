@@ -48,6 +48,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   private val _engineRunning = MutableStateFlow(false)
   val engineRunning: StateFlow<Boolean> = _engineRunning
 
+  /** dsh web 带 token 的访问地址（EngineManager 从引擎 stdout 实时解析）。 */
+  val webUrl: StateFlow<String?> get() = EngineManager.webUrl
+
   // ---- 设置 ----
   var port: Int
     get() = prefs.getInt("port", Paths.DSH_PORT).coerceIn(1024, 65535)
@@ -58,18 +61,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     set(value) = prefs.edit().putString("npm_registry", value).apply()
 
   // ---- 引擎控制 ----
-  fun startEngine() {
+  fun startEngine(onDone: (() -> Unit)? = null) {
     viewModelScope.launch(Dispatchers.IO) {
       val ok = engineManager.startEngine(port)
       if (ok) EngineService.start(getApplication())
       var waited = 0
-      // 轮询等待 Web UI 就绪（最多 30s）
-      while (ok && waited < 30_000 && !engineManager.isRunning) {
+      // 轮询等待 Web UI 就绪（最多 60s）：以「带 token 的 webUrl 解析完成」为就绪标准，
+      // 只探测端口会把 401 拒答误判为可用，WebView 随即撞上认证错误页。
+      while (ok && waited < 60_000 && EngineManager.webUrl.value == null) {
         Thread.sleep(1_000)
         waited += 1_000
       }
+      // 端口就绪但 URL 始终没打出来（异常场景）：退回端口探测结果，别让按钮悬空。
+      if (ok && EngineManager.webUrl.value == null && engineManager.isRunning) {
+        AppLog.log("vm", "端口已应答但未捕获 token URL，尝试从日志尾部解析")
+        resolveWebUrlFromLog()
+      }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
-      AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning}")
+      AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning} url=${EngineManager.webUrl.value != null}")
+      onDone?.let { withContext(Dispatchers.Main) { it() } }
+    }
+  }
+
+  /**
+   * 从引擎日志尾部解析带 token 的 webUrl（engine.log 为追加式，尾部即最新会话）。
+   * 引擎重启换新 token 后，新地址打印在日志更靠后的位置，解析结果自然更新。
+   */
+  fun resolveWebUrlFromLog() {
+    EngineManager.webUrlFromLog(engineManager.engineLog)?.let { EngineManager.webUrl.value = it }
+  }
+
+  /** 重置运行环境：停服务与引擎、删除 rootfs 与缓存、复位安装状态。 */
+  fun uninstallRuntime() {
+    viewModelScope.launch(Dispatchers.IO) {
+      EngineService.stop(getApplication())
+      engineManager.stopEngine()
+      rootfsManager.uninstall()
+      EngineManager.webUrl.value = null
+      _setup.value = SetupState()
+      withContext(Dispatchers.Main) { _engineRunning.value = false }
+      AppLog.log("vm", "运行环境已重置")
     }
   }
 

@@ -4,7 +4,7 @@
 
 **免 root 在 Android 上原生运行 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 的容器化方案**
 
-*proot 容器 · 完整 Linux 用户态 · Material You 原生壳*
+*proot 容器 · 完整 Linux 用户态 · Compose 原生外壳（对齐 dphmoblie UI）*
 
 [![最新版本](https://img.shields.io/github/v/release/masgzy/DeepSeek-Harness-Mobile?include_prereleases&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&logo=github)](https://github.com/masgzy/DeepSeek-Harness-Mobile/releases)
 [![总下载量](https://img.shields.io/github/downloads/masgzy/DeepSeek-Harness-Mobile/total?label=%E6%80%BB%E4%B8%8B%E8%BD%BD%E9%87%8F&logo=github)](https://github.com/masgzy/DeepSeek-Harness-Mobile/releases)
@@ -18,7 +18,7 @@
 [![Android 版本 \| ABI](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a-3DDC84?logo=android&logoColor=white)](./docs/architecture.md)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7F52FF?logo=kotlin&logoColor=white)](./app/build.gradle.kts)
 
-[![UI](https://img.shields.io/badge/UI-Material%20You%20(M3)-6750A4?logo=materialdesign&logoColor=white)](./app/src/main/java/io/github/masgzy/dshm/ui/theme/Theme.kt)
+[![UI](https://img.shields.io/badge/UI-Compose%20M3%20%C2%B7%20dphmoblie%20%E9%A3%8E%E6%A0%BC-315FCF?logo=materialdesign&logoColor=white)](./app/src/main/java/io/github/masgzy/dshm/ui/theme/Theme.kt)
 [![发行版](https://img.shields.io/badge/Ubuntu-26.04%20LTS-E95420?logo=ubuntu&logoColor=white)](./docs/architecture.md)
 [![Node.js](https://img.shields.io/badge/Node.js-24%20LTS-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![dsh](https://img.shields.io/badge/dsh-0.2.1--rc.2-4D6BFE)](https://www.npmjs.com/package/@deepseek-ai/dsh)
@@ -43,7 +43,10 @@
   - ⚡ **预装通道**：CI 构建的开箱即用 bundle（SHA-256 锁定），下载即可用，适合弱网环境
 - **供应链安全**：所有下载物强制 SHA-256 校验，镜像自动回退（官方源 ↔ 国内镜像）
 - **前台保活**：前台服务 + 5 秒看门狗，长任务运行不怕后台回收
-- **Material You**：Jetpack Compose + M3 动态取色，跟随系统壁纸换肤
+- **认证自愈**：自动解析 dsh web 启动时打印的带 token 访问地址，
+  引擎重启换 token 后 401 自愈重连，无需手动重开链接
+- **外壳视觉**：深浅双主题固定色板与卡片语言对齐
+  dphmoblie/deepseek-harness-android（对话门屏 / 环境管理 / 设置 / 终端风日志）
 - **工作区外置**：`Android/data/io.github.masgzy.dshm/files/workspace` 映射为容器内 `/root/projects`，文件管理器可直接访问
 
 ### 🧭 架构一图流
@@ -55,6 +58,7 @@
 │  ┌─────────────┐  ┌─────────────────────────────┐ │
 │  │ EngineService│  │  WebView                    │ │
 │  │ 前台保活+看门狗│  │  http://127.0.0.1:3080     │ │
+│  │ token URL 解析│  │  /?token=…（带 token 访问）  │ │
 │  └──────┬──────┘  └──────────────▲──────────────┘ │
 │         │                        │                │
 │  ┌──────▼────────────────────────┴──────────────┐ │
