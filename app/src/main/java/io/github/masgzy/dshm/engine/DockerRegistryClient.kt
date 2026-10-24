@@ -2,6 +2,7 @@ package io.github.masgzy.dshm.engine
 
 import io.github.masgzy.dshm.util.AppLog
 import io.github.masgzy.dshm.util.Downloader
+import io.github.masgzy.dshm.util.RegistryProbe
 import io.github.masgzy.dshm.util.TarExtractor
 import java.io.File
 import java.io.IOException
@@ -26,8 +27,9 @@ import org.json.JSONObject
  *      _digest_ 校验 → 按序解包进 rootfs 暂存目录（含 .wh.* whiteout 处理）；
  *      已完整下载且校验通过的层写入缓存，镜像源回退重试时直接复用。
  *
- * 镜像源：Docker Hub 引用默认走国内可达镜像（daocloud / 1panel / 1ms），
- * 全部失败再回退 registry-1.docker.io；自定义第三方 registry 只走其自身。
+ * 镜像源：Docker Hub 引用先经 [RegistryProbe] 并行测速（/v2/ 首字节，结果缓存
+ * 6h），按延迟升序回退，全部失败再用静态顺序；官方端点永远垫底。
+ * 自定义第三方 registry 只走其自身。
  */
 class DockerRegistryClient(
   private val cacheDir: File,
@@ -96,15 +98,11 @@ class DockerRegistryClient(
       raw.trim().let { it.isNotBlank() && it.length <= 256 } && runCatching { parse(raw) }.isSuccess
   }
 
-  // ---- 镜像源表（参照 proot-distro-i18n mirrors.py，2025-2026 公开可用性整理） ----
+  // ---- 镜像源表 ----
 
-  /** Docker Hub 的registry 镜像源（顺序即回退顺序），官方端点在最后。 */
-  private val HUB_BASES = listOf(
-    "https://docker.m.daocloud.io",
-    "https://docker.1panel.live",
-    "https://docker.1ms.run",
-    "https://registry-1.docker.io",
-  )
+  /** Docker Hub 镜像源静态默认序（RegistryProbe 测速全败/无缓存时的兑底）。 */
+  private val HUB_BASES_FALLBACK: List<String> =
+    RegistryProbe.CANDIDATES.map { it.base } + RegistryProbe.OFFICIAL_BASE
 
   private val MEDIA_TYPES = listOf(
     "application/vnd.docker.distribution.manifest.v2+json",
@@ -137,8 +135,12 @@ class DockerRegistryClient(
     onProgress: (step: String, done: Long, total: Long) -> Unit,
   ) {
     val ref = RefParser.parse(refRaw)
+    // Docker Hub 引用：多镜像源测速择优（缓存 6h；全败用静态默认序）
     val bases: List<String> =
-      if (ref.registry == "registry-1.docker.io") HUB_BASES else listOf(ref.baseUrl())
+      if (ref.registry == "registry-1.docker.io") {
+        runCatching { RegistryProbe.orderedBases(cacheDir, onLog = onLog) }
+          .getOrDefault(HUB_BASES_FALLBACK)
+      } else listOf(ref.baseUrl())
     var lastError: Exception? = null
     for (base in bases) {
       try {

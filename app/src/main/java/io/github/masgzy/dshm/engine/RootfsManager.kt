@@ -45,21 +45,23 @@ class RootfsManager(private val filesDir: File) {
     when {
       // ① cdimage 直链优先（Ubuntu / Alpine），失败回退 registry
       distro.cdimage != null -> {
-        val ok = runCatching { installCdimage(distro, staging, onProgress, onLog) }
-          .onFailure { AppLog.log("rootfs", "cdimage 路径失败，回退 registry: ${distro.fallbackImageRef}", it) }
-          .isSuccess
-        if (!ok) {
-          onLog("直链不可用，改从 Docker registry 拉取 ${distro.fallbackImageRef}")
+        val failure = runCatching { installCdimage(distro, staging, onProgress, onLog) }
+          .exceptionOrNull()
+        if (failure != null) {
+          AppLog.log("rootfs", "cdimage 路径失败，回退 registry: ${distro.fallbackImageRef}", failure)
+          // 日志如实区分：下载失败 / 解压失败（历史 bug：SHA-256 已过、解压报错，
+          // 却被笼统报成「直链不可用」，误导排查）
+          onLog("直链路径未完成（${failure.message}），改从 Docker registry 拉取 ${distro.fallbackImageRef}")
           pullRegistry(distro.fallbackImageRef, staging, distro.arch, onProgress, onLog)
         }
       }
       // ② lxc-images 直链（Debian），失败回退 registry
       distro.lxc != null -> {
-        val ok = runCatching { installLxcImages(distro, staging, onProgress, onLog) }
-          .onFailure { AppLog.log("rootfs", "lxc-images 路径失败，回退 registry: ${distro.fallbackImageRef}", it) }
-          .isSuccess
-        if (!ok) {
-          onLog("lxc-images 直链不可用，改从 Docker registry 拉取 ${distro.fallbackImageRef}")
+        val failure = runCatching { installLxcImages(distro, staging, onProgress, onLog) }
+          .exceptionOrNull()
+        if (failure != null) {
+          AppLog.log("rootfs", "lxc-images 路径失败，回退 registry: ${distro.fallbackImageRef}", failure)
+          onLog("lxc-images 直链路径未完成（${failure.message}），改从 Docker registry 拉取 ${distro.fallbackImageRef}")
           pullRegistry(distro.fallbackImageRef, staging, distro.arch, onProgress, onLog)
         }
       }
@@ -112,12 +114,8 @@ class RootfsManager(private val filesDir: File) {
       }
     }
     onProgress("解压 rootfs", 0, 1)
-    val ok = TarExtractor.extract(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
-    AppLog.log("rootfs", "cdimage staging 解压 ok=$ok entries=${staging.listFiles()?.size ?: 0}")
-    if (!ok) {
-      staging.deleteRecursively()
-      throw IOException("rootfs 解压失败")
-    }
+    TarExtractor.extractOrThrow(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
+    AppLog.log("rootfs", "cdimage staging 解压完成 entries=${staging.listFiles()?.size ?: 0}")
   }
 
   /** lxc-images 直链路径：simplestreams 解析 → 多镜像下载 → 索引内 SHA-256 校验 → 解包。 */
@@ -140,12 +138,8 @@ class RootfsManager(private val filesDir: File) {
       onProgress("下载 ${distro.label} rootfs", done, total)
     }
     onProgress("解压 rootfs", 0, 1)
-    val ok = TarExtractor.extract(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
-    AppLog.log("rootfs", "lxc-images staging 解压 ok=$ok entries=${staging.listFiles()?.size ?: 0}")
-    if (!ok) {
-      staging.deleteRecursively()
-      throw IOException("rootfs 解压失败")
-    }
+    TarExtractor.extractOrThrow(archive, staging) { count -> onProgress("解压 rootfs", count, 0) }
+    AppLog.log("rootfs", "lxc-images staging 解压完成 entries=${staging.listFiles()?.size ?: 0}")
   }
 
   /** registry 路径：Docker Registry v2 逐层拉取解包。 */
