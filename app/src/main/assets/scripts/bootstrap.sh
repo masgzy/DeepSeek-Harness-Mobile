@@ -197,19 +197,38 @@ ln -sf "$PNPM_REAL" /usr/local/bin/pnpm
 
 # ---- 3. pnpm 全局安装 @deepseek-ai/dsh（失败自动回退 npm） ----
 log "[3/5] pnpm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} ..."
-# --allow-build：pnpm 10+ 默认禁止依赖的生命周期脚本，必须放行：
-#   koffi                 install 脚本优先加载 optional 预编译二进制，无需编译
-#   node-pty              预编译直接打包在 tarball 内
-#   dsh-subprocess-local  postinstall 恢复 node-pty spawn-helper 可执行位
-#   @deepseek-ai/dsh      主包自身生命周期脚本
-# 探测支持后再加 flag，兼容旧版 pnpm。
+# --node-linker=hoisted：npm 式平铺布局。pnpm 默认隔离布局（.pnpm + 符号链接）
+# 在 proot 下导致 koffi 预编译二进制加载失败（alpine3 真机三轮复现，而 npm
+# 平铺布局可用）；hoisted 与 npm 回退路径的目录结构完全一致，规避该问题。
+# --allow-build：pnpm 10+ 默认禁止依赖的生命周期脚本。注意 koffi 不放行：
+#   其 install 脚本（cnoke --prebuild）只是"预编译可加载性"校验器，预编译
+#   可用时为空操作；加载失败时回退源码编译（容器无 CMake）→ 整个安装硬
+#   失败且真实错误被吞。改由安装完成后 bootstrap 亲自验证并输出真实错误。
+#   其余放行：node-pty 预编译打包在 tarball 内（prebuild.js 落位）；
+#   dsh-subprocess-local 恢复 node-pty spawn-helper 可执行位；dsh 主包脚本。
 ALLOW_FLAGS=""
 if pnpm add --help 2>/dev/null | grep -q -- "--allow-build"; then
-  ALLOW_FLAGS="--allow-build=koffi --allow-build=node-pty --allow-build=@deepseek-ai/dsh --allow-build=@deepseek-ai/dsh-subprocess-local"
+  ALLOW_FLAGS="--allow-build=node-pty --allow-build=@deepseek-ai/dsh --allow-build=@deepseek-ai/dsh-subprocess-local"
 fi
 DSH_SPEC="@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
-if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS --registry="$DSH_NPM_REGISTRY" "$DSH_SPEC"; then
+if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS --node-linker=hoisted --registry="$DSH_NPM_REGISTRY" "$DSH_SPEC"; then
   log "  pnpm 安装 dsh 完成"
+  # koffi 预编译加载验证（与 cnoke checkPrebuild 同法 require 包目录）：
+  # koffi 是 dsh 运行时 FFI 依赖，平台包内含 glibc/musl 双二进制，musl 变体
+  # 仅需 libstdc++（apk 已补）。失败时把真实错误打进日志（cnoke 会吞掉它）
+  KOFFI_DIR="$(find "$PNPM_HOME/global" -type d -name koffi -path '*node_modules/koffi' 2>/dev/null | head -1 || true)"
+  if [ -n "$KOFFI_DIR" ]; then
+    if node -e "require(process.argv[1])" "$KOFFI_DIR" >/dev/null 2>&1; then
+      log "  koffi 预编译加载验证通过"
+    else
+      log "  [警告] koffi 预编译加载失败，真实错误："
+      node -e "require(process.argv[1])" "$KOFFI_DIR" 2>&1 | head -6 | sed 's/^/[dshm-bootstrap]     /' || true
+      log "  回退 npm 安装（保底路径）..."
+      rm -f "$PNPM_HOME/bin/dsh" "$PNPM_HOME/dsh" 2>/dev/null || true
+      hash -r
+      npm install -g --no-audit --no-fund --loglevel=notice "$DSH_SPEC"
+    fi
+  fi
 else
   log "  pnpm 安装失败，回退 npm 安装（保底路径）..."
   # 清掉可能残留的 pnpm 半成品 dsh shim，避免 PATH 中 $PNPM_HOME/bin
