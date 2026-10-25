@@ -159,28 +159,91 @@ class EngineManager(private val context: Context) {
    * 停止引擎：SIGTERM 给 proot 5s 优雅退出（--kill-on-exit 连带清理容器内子进程），
    * 超时则 SIGKILL 强杀（再给 2s）。旧实现 waitFor() 无限等待，proot 清理慢时
    * 调用线程（含 EngineService.onDestroy 的主线程路径）被拖住十秒以上 → ANR 闪退。
+   *
+   * 另处理孤儿引擎：APP 重启后附着存活引擎时 current == null（句柄已丢失），
+   * 此时停止必须扫宿主 /proc 找到 proot/dsh 进程树强杀，否则 dsh web 继续应答、
+   * 「点击停止不会停止」。杀完以端口探测复核。
    */
   @Synchronized
   fun stopEngine() {
     val proc = current
-    if (proc == null) {
-      webUrl.value = null
-      return
-    }
-    try {
-      proc.destroy()
-      if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-        AppLog.log("engine", "SIGTERM 5s 未退出，SIGKILL 强制结束")
-        proc.destroyForcibly()
-        proc.waitFor(2, TimeUnit.SECONDS)
+    if (proc != null) {
+      try {
+        proc.destroy()
+        if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+          AppLog.log("engine", "SIGTERM 5s 未退出，SIGKILL 强制结束")
+          proc.destroyForcibly()
+          proc.waitFor(2, TimeUnit.SECONDS)
+        }
+        AppLog.log("engine", "引擎已停止")
+      } catch (t: Throwable) {
+        AppLog.log("engine", "停止引擎异常", t)
+        runCatching { proc.destroyForcibly() }
       }
-      AppLog.log("engine", "引擎已停止")
-    } catch (t: Throwable) {
-      AppLog.log("engine", "停止引擎异常", t)
-      runCatching { proc.destroyForcibly() }
-    } finally {
-      current = null
-      webUrl.value = null
     }
+    // 孤儿清理：current 为空（APP 重启附着）或进程已死但端口仍在应答时执行
+    if (proc == null || EngineProbe.check()) {
+      val killed = killOrphanEngineProcesses()
+      if (killed > 0) {
+        AppLog.log("engine", "孤儿引擎清理：终止 $killed 个残留进程（当前句柄 ${if (proc == null) "缺失" else "已退出"}）")
+      }
+    }
+    current = null
+    webUrl.value = null
+  }
+
+  /**
+   * 扫描宿主 /proc 终止残留的引擎进程树（proot 主进程 + 容器内 dsh web tracee）。
+   * 匹配特征：argv 含本 rootfs 绝对路径（-r 参数）且包含 dsh/web 两个独立参数；
+   * 终端/安装脚本的 proot 进程不含 dsh web 组合，不会被误杀。
+   * @return 实际发信号的进程数。
+   */
+  private fun killOrphanEngineProcesses(): Int {
+    val rootfsPath = rootfsDir.absolutePath
+    var killed = 0
+    val dir = java.io.File("/proc")
+    val candidates = dir.listFiles { f -> f.name.toIntOrNull() != null } ?: return 0
+    for (entry in candidates) {
+      val pid = entry.name.toIntOrNull() ?: continue
+      if (pid == android.os.Process.myPid()) continue
+      val args = runCatching {
+        entry.resolve("cmdline").readBytes().toString(Charsets.UTF_8)
+          .split('\u0000').filter { it.isNotBlank() }
+      }.getOrNull() ?: continue
+      val isEngine = args.contains(rootfsPath) && args.contains("dsh") && args.contains("web")
+      if (!isEngine) continue
+      // 先 SIGTERM 给 proot 机会触发 --kill-on-exit 清理 tracee，再补 SIGKILL
+      runCatching { ProcessBuilder("kill", "-TERM", pid.toString()).start().waitFor() }
+      killed++
+    }
+    if (killed == 0) return 0
+    // 给 SIGTERM 最多 3 秒生效窗口，仍存活的（proot/tracee）直接 SIGKILL
+    val deadline = System.currentTimeMillis() + 3_000
+    while (System.currentTimeMillis() < deadline) {
+      val alive = survivingEnginePids()
+      if (alive.isEmpty()) break
+      Thread.sleep(300)
+    }
+    for (pid in survivingEnginePids()) {
+      runCatching { ProcessBuilder("kill", "-KILL", pid.toString()).start().waitFor() }
+    }
+    return killed
+  }
+
+  /** 当前仍存活（cmdline 可读且特征匹配）的引擎进程 PID 集合。 */
+  private fun survivingEnginePids(): Set<Int> {
+    val rootfsPath = rootfsDir.absolutePath
+    val out = mutableSetOf<Int>()
+    val candidates = java.io.File("/proc").listFiles { f -> f.name.toIntOrNull() != null } ?: return out
+    for (entry in candidates) {
+      val pid = entry.name.toIntOrNull() ?: continue
+      if (pid == android.os.Process.myPid()) continue
+      val args = runCatching {
+        entry.resolve("cmdline").readBytes().toString(Charsets.UTF_8)
+          .split('\u0000').filter { it.isNotBlank() }
+      }.getOrNull() ?: continue
+      if (args.contains(rootfsPath) && args.contains("dsh") && args.contains("web")) out += pid
+    }
+    return out
   }
 }

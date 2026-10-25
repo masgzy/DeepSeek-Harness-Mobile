@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Done
@@ -22,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +45,9 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 /**
  * 安装日志块（终端深色底 + 等宽字 + 分级着色 + 复制按钮）。
  *
+ * 布局：固定高度 264dp、内部纵向滚动（长日志不再撑破整页）；
+ * 新日志到达时自动滚到底部；上限 500 条（与 AppViewModel.appendLog 一致）。
+ *
  * 配色按行内关键词分级：
  *  - 失败 / FAIL / error → 红；
  *  - 警告 / warn / deprecated / 跳过 → 琥珀；
@@ -53,12 +59,13 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 @Composable
 fun InstallLogBlock(
   lines: List<String>,
-  title: String = "安装日志（最近 ${lines.size.coerceAtMost(30)} 条）",
-  visibleCount: Int = 30,
+  title: String = "安装日志（最近 ${lines.size.coerceAtMost(500)} 条，可上下滑动）",
+  visibleCount: Int = 500,
 ) {
   val p = LocalDshmPalette.current
   val clipboard = LocalClipboardManager.current
   var copied by remember { mutableStateOf(false) }
+  val scrollState = rememberScrollState()
 
   Column(
     Modifier
@@ -106,14 +113,31 @@ fun InstallLogBlock(
       }
     }
     Spacer(Modifier.height(8.dp))
-    lines.takeLast(visibleCount).forEach { line ->
-      Text(
-        line,
-        fontSize = 10.sp,
-        lineHeight = 14.5.sp,
-        fontFamily = FontFamily.Monospace,
-        color = logLineColor(line),
-      )
+    // 固定高度日志区（用户要求：固定高度、可上下滑动、上限 500 条）
+    Box(
+      Modifier
+        .fillMaxWidth()
+        .height(264.dp)
+        .verticalScroll(scrollState),
+    ) {
+      Column {
+        lines.takeLast(visibleCount).forEach { line ->
+          Text(
+            line,
+            fontSize = 10.sp,
+            lineHeight = 14.5.sp,
+            fontFamily = FontFamily.Monospace,
+            color = logLineColor(line),
+          )
+        }
+      }
+    }
+    // 新日志到达自动滚到底部（用户手动上翻时不打扰：仅在已在底部附近时跟随）
+    LaunchedEffect(lines.size) {
+      if (lines.isNotEmpty()) {
+        kotlinx.coroutines.delay(60)
+        runCatching { scrollState.animateScrollTo(scrollState.maxValue) }
+      }
     }
     if (copied) {
       // 3 秒后恢复「复制」态

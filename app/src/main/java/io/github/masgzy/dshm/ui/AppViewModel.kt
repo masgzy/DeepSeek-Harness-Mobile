@@ -98,46 +98,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     get() = prefs.getString("apk_mirror", "") ?: ""
     set(value) = prefs.edit().putString("apk_mirror", value).apply()
 
+  /** pnpm 版本线（"12" 默认 / "11"；pnpm 12 为 Rust 重写，安装/运行均更快）。 */
+  var pnpmMajor: String
+    get() = prefs.getString("pnpm_major", "12") ?: "12"
+    set(value) = prefs.edit().putString("pnpm_major", value).apply()
+
+  /** pnpm 安装方式：npm 直装（默认）/ get-pnpm（官方 npx 自举）/ script（大陆适配一键脚本）。 */
+  var pnpmMethod: String
+    get() = prefs.getString("pnpm_method", "npm") ?: "npm"
+    set(value) = prefs.edit().putString("pnpm_method", value).apply()
+
   private val _mirrorProbe = MutableStateFlow(MirrorProbeState())
   val mirrorProbe: StateFlow<MirrorProbeState> = _mirrorProbe
 
   /** 并行测速 apt/apk 镜像源，自动择优持久化；容器已安装时即时写入。 */
   fun probeMirrors() {
     if (_mirrorProbe.value.running) return
-    val distro = this.distro
     viewModelScope.launch(Dispatchers.IO) {
       _mirrorProbe.value = MirrorProbeState(running = true)
       try {
-        var aptResults: List<MirrorProbe.Result> = emptyList()
-        var apkResults: List<MirrorProbe.Result> = emptyList()
-        // apt 候选按所选发行版套件探测（自定义镜像无已知套件，跳过）
-        val suite = when (distro.id) {
-          "ubuntu26" -> "resolute"
-          "ubuntu24" -> "noble"
-          "debian13" -> "trixie"
-          "debian12" -> "bookworm"
-          else -> ""
-        }
-        if (suite.isNotEmpty()) {
-          val mirrors =
-            if (distro.id.startsWith("ubuntu")) MirrorProbe.ubuntuMirrors(suite)
-            else MirrorProbe.debianMirrors(suite)
-          aptResults = MirrorProbe.probe(mirrors) { r ->
-            val cur = _mirrorProbe.value
-            _mirrorProbe.value = cur.copy(apt = mergeProbe(cur.apt, r))
-          }
-        }
-        if (distro.family == DistroFamily.ALPINE) {
-          val branch = distro.cdimage?.release ?: "3.22"
-          apkResults = MirrorProbe.probe(MirrorProbe.alpineMirrors(branch)) { r ->
-            val cur = _mirrorProbe.value
-            _mirrorProbe.value = cur.copy(apk = mergeProbe(cur.apk, r))
-          }
-        }
-        // 择优持久化（首个可用 = 延迟最低）
-        aptResults.firstOrNull { it.latencyMs != null }?.let { aptMirror = it.mirror.applyBase }
-        apkResults.firstOrNull { it.latencyMs != null }?.let { apkMirror = it.mirror.applyBase }
-        AppLog.log("mirror", "镜像测速完成 apt=${aptMirror.ifBlank { "-" }} apk=${apkMirror.ifBlank { "-" }}")
+        val (aptResults, apkResults) = probeMirrorsCore()
         _mirrorProbe.value = MirrorProbeState(
           apt = aptResults.sortedWith(compareBy { it.latencyMs ?: Long.MAX_VALUE }),
           apk = apkResults.sortedWith(compareBy { it.latencyMs ?: Long.MAX_VALUE }),
@@ -155,6 +135,46 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       }
     }
   }
+
+  /**
+   * 镜像测速核心（阻塞，IO 线程）：按当前发行版探测 apt/apk 候选并择优持久化。
+   * 已有择优结果的维度跳过（skipMissingOnly 语义：只补缺的那一侧）。
+   * 手动测速（设置页）与首装自动测速共用。
+   */
+  private suspend fun probeMirrorsCore(): Pair<List<MirrorProbe.Result>, List<MirrorProbe.Result>> =
+    withContext(Dispatchers.IO) {
+      val distro = this@AppViewModel.distro
+      var aptResults: List<MirrorProbe.Result> = emptyList()
+      var apkResults: List<MirrorProbe.Result> = emptyList()
+      // apt 候选按所选发行版套件探测（自定义镜像无已知套件，跳过）
+      val suite = when (distro.id) {
+        "ubuntu26" -> "resolute"
+        "ubuntu24" -> "noble"
+        "debian13" -> "trixie"
+        "debian12" -> "bookworm"
+        else -> ""
+      }
+      if (suite.isNotEmpty() && aptMirror.isBlank()) {
+        val mirrors =
+          if (distro.id.startsWith("ubuntu")) MirrorProbe.ubuntuMirrors(suite)
+          else MirrorProbe.debianMirrors(suite)
+        aptResults = MirrorProbe.probe(mirrors) { r ->
+          val cur = _mirrorProbe.value
+          _mirrorProbe.value = cur.copy(apt = mergeProbe(cur.apt, r))
+        }
+        aptResults.firstOrNull { it.latencyMs != null }?.let { aptMirror = it.mirror.applyBase }
+      }
+      if (distro.family == DistroFamily.ALPINE && apkMirror.isBlank()) {
+        val branch = distro.cdimage?.release ?: "3.22"
+        apkResults = MirrorProbe.probe(MirrorProbe.alpineMirrors(branch)) { r ->
+          val cur = _mirrorProbe.value
+          _mirrorProbe.value = cur.copy(apk = mergeProbe(cur.apk, r))
+        }
+        apkResults.firstOrNull { it.latencyMs != null }?.let { apkMirror = it.mirror.applyBase }
+      }
+      AppLog.log("mirror", "镜像测速完成 apt=${aptMirror.ifBlank { "-" }} apk=${apkMirror.ifBlank { "-" }}")
+      aptResults to apkResults
+    }
 
   /** 测速结果按镜像去重合入（同一镜像取更快的一次）。 */
   private fun mergeProbe(
@@ -311,9 +331,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val distro = this.distro
     val nodeVersion = this.nodeVersion
     val dshVersion = this.dshVersion
+    val pnpmMajor = this.pnpmMajor
+    val pnpmMethod = this.pnpmMethod
     viewModelScope.launch(Dispatchers.IO) {
       _setup.value = SetupState(running = true, step = "准备安装")
       try {
+        // 首装前镜像测速（反馈：测速应该在安装时做）——apt/apk 未测过时自动
+        // 执行并择优持久化，择优结果直接作为安装参数（写入 sources/apk 源）
+        if (aptMirror.isBlank() || apkMirror.isBlank()) {
+          updateProgress("镜像源测速", 0, 1)
+          appendLog("[mirror] 首次安装自动测速镜像源（并行首字节，数秒）...")
+          probeMirrorsCore()
+        }
         rootfsManager.install(
           distro,
           onProgress = { step, done, total -> updateProgress(step, done, total) },
@@ -326,12 +355,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
           dshVersion = dshVersion,
           aptMirror = aptMirror,
           alpineMirror = apkMirror,
+          pnpmMajor = pnpmMajor,
+          pnpmMethod = pnpmMethod,
           onProgress = { step, done, total -> updateProgress(step, done, total) },
           onLog = { line -> appendLog(line) },
         )
         // 首装完成即同步模型配置（用户可能在安装前就填好了 Key）
         modelConfig.sync()
         _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
+        // 装完自动启动引擎预热 dsh web：消除「装完还要手动等 10-30s 启动」
+        // 的感知延迟；下次打开对话直接就绪
+        appendLog("[setup] 安装完成，自动启动引擎预热（后台）...")
+        val ok = engineManager.startEngine(port)
+        if (ok) EngineService.start(getApplication())
+        withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       } catch (t: Throwable) {
         AppLog.log("setup", "安装失败", t)
         _setup.value = _setup.value.copy(running = false, error = describe(t))
@@ -367,7 +404,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   private fun appendLog(line: String) {
-    val lines = (_setup.value.logLines + line).takeLast(200)
+    // 上限 500 条（UI 固定高度可滚动展示，避免长安装日志被过早裁剪）
+    val lines = (_setup.value.logLines + line).takeLast(500)
     _setup.value = _setup.value.copy(logLines = lines)
   }
 }

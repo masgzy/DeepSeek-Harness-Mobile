@@ -22,11 +22,13 @@ jobs:
             scripts/fetch-proot.sh \
             runtime/build-rootfs.sh \
             app/src/main/assets/scripts/bootstrap.sh \
+            app/src/main/assets/scripts/pnpm-install.sh \
             app/src/main/assets/scripts/mirror-apply.sh
       - name: bash 语法检查
         run: |
           for f in scripts/fetch-proot.sh runtime/build-rootfs.sh \
                    app/src/main/assets/scripts/bootstrap.sh \
+                   app/src/main/assets/scripts/pnpm-install.sh \
                    app/src/main/assets/scripts/mirror-apply.sh; do
             bash -n "$f"
           done

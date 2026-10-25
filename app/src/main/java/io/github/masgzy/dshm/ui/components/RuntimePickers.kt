@@ -17,9 +17,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -417,6 +419,86 @@ private fun SelectRow(
     }
     if (selected) {
       Icon(Icons.Outlined.Check, null, tint = p.blue, modifier = Modifier.size(17.dp))
+    }
+  }
+}
+
+// ---------------------------------------------------------------- pnpm
+
+/** pnpm 版本线选择（12 = Rust 重写，安装与运行更快，默认；11 兼容旧依赖）。 */
+@Composable
+fun PnpmMajorPickerDialog(
+  viewModel: AppViewModel,
+  onDismiss: () -> Unit,
+) {
+  var draft by remember { mutableStateOf(viewModel.pnpmMajor) }
+  DshmDialog(
+    onDismiss = onDismiss,
+    title = "pnpm 版本",
+    message = "pnpm 12 使用 Rust 重写（原生二进制），安装与执行显著快于 npm 与旧版 pnpm；默认推荐 12。",
+    icon = Icons.Outlined.Bolt,
+    confirmLabel = "保存",
+    onConfirm = {
+      viewModel.pnpmMajor = draft
+      onDismiss()
+    },
+  ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      SelectRow(
+        title = "pnpm 12（推荐）",
+        subtitle = "Rust 原生二进制，npmmirror 平台包齐全（glibc/musl）",
+        selected = draft == "12",
+        badge = "默认",
+        onClick = { draft = "12" },
+      )
+      SelectRow(
+        title = "pnpm 11",
+        subtitle = "旧版 JS 引擎，兼容个别不兼容 v12 的项目",
+        selected = draft == "11",
+        onClick = { draft = "11" },
+      )
+    }
+  }
+}
+
+/** pnpm 安装方式选择（npm 直装 / get-pnpm 官方自举 / 大陆适配一键脚本）。 */
+@Composable
+fun PnpmMethodPickerDialog(
+  viewModel: AppViewModel,
+  onDismiss: () -> Unit,
+) {
+  var draft by remember { mutableStateOf(viewModel.pnpmMethod) }
+  DshmDialog(
+    onDismiss = onDismiss,
+    title = "pnpm 安装方式",
+    message = "三种方式均走当前 npm 镜像源；实测 npm 直装（pnpm 12）即得 Rust 二进制，最简单可靠。",
+    icon = Icons.Outlined.Download,
+    confirmLabel = "保存",
+    onConfirm = {
+      viewModel.pnpmMethod = draft
+      onDismiss()
+    },
+  ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      SelectRow(
+        title = "npm 直装（推荐）",
+        subtitle = "npm i -g pnpm@<版本线>；单包单 tarball，产物为原生二进制",
+        selected = draft == "npm",
+        badge = "默认",
+        onClick = { draft = "npm" },
+      )
+      SelectRow(
+        title = "get-pnpm 官方自举",
+        subtitle = "npx get-pnpm；官方工具自动识别 musl/glibc 并安装到独立目录",
+        selected = draft == "getpnpm",
+        onClick = { draft = "getpnpm" },
+      )
+      SelectRow(
+        title = "一键脚本（大陆适配）",
+        subtitle = "精简版 get.pnpm.io 脚本：全走镜像、跳过 packument、单 tarball、SHA-512 校验",
+        selected = draft == "script",
+        onClick = { draft = "script" },
+      )
     }
   }
 }
