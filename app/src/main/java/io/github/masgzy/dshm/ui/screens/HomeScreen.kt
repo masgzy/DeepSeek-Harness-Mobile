@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Square
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,9 +54,10 @@ import kotlinx.coroutines.delay
  * dsh Web UI（参考项目 openHarness → HarnessActivity 覆盖外壳的同款模式）。
  * 引擎已在运行时主按钮变为「进入对话」，直接凭日志尾部 token 打开对话页；
  * 引擎重启换 token 的 401 自愈逻辑内置于 HarnessActivity。
+ * 容器终端入口在本屏底部（顶栏只留设置键，避免拥挤）。
  */
 @Composable
-fun HomeScreen(viewModel: AppViewModel) {
+fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
   val running by viewModel.engineRunning.collectAsState()
   val webUrl by viewModel.webUrl.collectAsState()
   val context = LocalContext.current
@@ -266,6 +268,20 @@ fun HomeScreen(viewModel: AppViewModel) {
       title = "请勿从最近任务划掉应用",
       message = "启动对话后将开启前台服务保活；长时间任务期间请保持应用在后台运行，" +
         "进程被系统回收时看门狗会自动重启引擎。",
+    )
+
+    // 容器终端入口（原顶栏图标键迁到这里，顶栏不再拥挤；全屏独立页）
+    SecondaryButton(
+      "容器终端",
+      onOpenTerminal,
+      Modifier.fillMaxWidth(),
+      icon = Icons.Outlined.Terminal,
+    )
+    Text(
+      "在 proot 容器内打开交互式 bash，可直接管理环境与排查问题。",
+      fontSize = 12.sp,
+      lineHeight = 17.sp,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
     Spacer(Modifier.height(8.dp))

@@ -78,7 +78,17 @@ class DshmTerminalClient : TerminalSessionClient, TerminalViewClient {
   override fun onScale(scale: Float): Float = scale
 
   override fun onSingleTapUp(e: MotionEvent) {
-    // 软键盘唤起由 TerminalView 内部 requestFocus 处理
+    // Termux 同款：点终端任意处 = 要焦点 + 拉起软键盘。
+    // 仅 requestFocus 不会唤出 IME（焦点流转与 IMMS 是两回事），必须显式 showSoftInput；
+    // 刚 requestFocus 后 IMMS 可能尚未完成焦点流转，post 一次兜底重试。
+    val v = view ?: return
+    if (!v.hasFocus()) v.requestFocus()
+    val imm =
+      v.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+        as? android.view.inputmethod.InputMethodManager ?: return
+    imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    // 兜底：showSoftInput 幂等，重复请求对已弹出的 IME 无副作用
+    v.post { if (v.hasFocus()) imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
   }
 
   override fun shouldBackButtonBeMappedToEscape(): Boolean = false

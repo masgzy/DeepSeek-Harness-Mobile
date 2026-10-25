@@ -84,9 +84,8 @@ import kotlinx.coroutines.delay
 fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
   val setup by viewModel.setup.collectAsState()
   val running by viewModel.engineRunning.collectAsState()
-  val rootfsReady = viewModel.rootfsManager.isRootfsReady
-  val engineReady = viewModel.engineManager.engineReady
-  val installed = rootfsReady && (engineReady || setup.done)
+  // 与 AppRoot 同源：安装态由 ViewModel 统一发布（轮询+完成路径双保险）
+  val installed by viewModel.installedUi.collectAsState()
   val inProgress = setup.running
   var confirmReset by remember { mutableStateOf(false) }
   var showDistroPicker by remember { mutableStateOf(false) }
