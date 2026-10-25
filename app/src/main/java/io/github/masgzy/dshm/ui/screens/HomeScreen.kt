@@ -84,16 +84,35 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
     }
   }
 
-  // 兜底轮询：请求已挂起但 URL 未就绪（如 APP 重启后附着到仍在运行的引擎）→
-  // 每 2 秒从引擎日志尾部解析一次（解析结果经活性验证，过期 token 不会被采用）。
-  // 90s 仍拿不到有效凭据（引擎已死/反复重启）→ 收场并提示，避免无限等待。
+  // 兜底轮询：请求已挂起但 URL 未就绪 → 每 2 秒从引擎日志尾部解析一次。
+  // 约 8s（4 轮）仍无凭据时触发自愈：引擎在运行 → 重启换新 token（附着到旧
+  // 引擎时日志尾部 token 可能已被消费，干等永远 401）；引擎不在 → 重新启动。
+  // 150s 仍拿不到有效凭据 → 收场并提示，避免无限等待。
   LaunchedEffect(pendingOpen) {
     if (!pendingOpen) return@LaunchedEffect
     var waited = 0
-    while (pendingOpen && webUrl == null && waited < 90_000) {
+    var attempts = 0
+    var recovered = false
+    while (pendingOpen && webUrl == null && waited < 150_000) {
       viewModel.resolveWebUrlFromLog()
       delay(2_000)
       waited += 2_000
+      attempts += 1
+      if (attempts == 4 && !recovered) {
+        recovered = true
+        if (running) {
+          viewModel.restartEngine()
+        } else {
+          launching = true
+          viewModel.startEngine { ok ->
+            launching = false
+            if (!ok) {
+              pendingOpen = false
+              openFailed = true
+            }
+          }
+        }
+      }
     }
     if (pendingOpen && webUrl == null) {
       pendingOpen = false
@@ -115,7 +134,7 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
       .padding(horizontal = 16.dp, vertical = 22.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
-    ScreenHeading("Harness 对话", title(running, launching, stopping))
+    ScreenHeading("Harness 对话", title(webUrl != null, running, launching, stopping))
 
     // launch-panel：52dp 图标块 + 文案 + 分隔线 + 按钮区
     // （.launch-panel：135° blue-soft→surface 对角渐变 + 1px 淡蓝外环）
@@ -173,14 +192,14 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
           Text(
-            headline(running, launching, stopping),
+            headline(webUrl != null, running, launching, stopping),
             fontSize = 19.sp,
             fontWeight = FontWeight.SemiBold,
             lineHeight = 25.sp,
             color = MaterialTheme.colorScheme.onSurface,
           )
           Text(
-            detail(running, launching, stopping),
+            detail(webUrl != null, running, launching, stopping),
             fontSize = 13.sp,
             lineHeight = 20.sp,
             color = LocalDshmPalette.current.muted,
@@ -205,14 +224,19 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
         PrimaryButton(
           text = when {
             launching -> "正在打开…"
-            running -> "进入对话"
+            webUrl != null -> "进入对话"
+            running -> "获取凭据并进入"
             else -> "打开对话"
           },
           onClick = {
             openFailed = false
             pendingOpen = true
-            if (running) {
-              // 引擎已在运行：直接从日志尾部解析 token（多数情况下瞬时完成）
+            if (webUrl != null) {
+              // 凭据已在手：直接打开（覆盖同会话内反复进出对话页）
+              openHarness(webUrl!!)
+            } else if (running) {
+              // 引擎在运行但凭据未就绪：先试日志尾部解析，8s 无果由轮询
+              // 自动重启引擎换新 token（旧 token 可能已被消费，干等永远 401）
               viewModel.resolveWebUrlFromLog()
             } else {
               launching = true
@@ -250,15 +274,17 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
     if (pendingOpen && webUrl == null) {
       InlineAlert(
         title = "正在获取访问凭据",
-        message = "正在等待 dsh web 打印本次会话的带 token 地址；" +
-          "首次启动约需 10-30 秒，就绪后将自动进入对话。",
+        message = "正在等待 dsh web 打印本次会话的带 token 地址（首次启动约需 10-30 秒）。" +
+          "若引擎未运行或凭据已过期，会自动重启引擎获取新地址；" +
+          "实时进展可在「设置 → 日志」查看。",
       )
     }
 
     if (openFailed) {
       InlineAlert(
         title = "无法启动对话",
-        message = "引擎启动失败或运行组件缺失，请到「设置 → 运行环境」查看运行时状态，安装日志见安装引导页。",
+        message = "引擎启动失败或凭据获取超时，请到「设置 → 日志」查看引擎命令、退出码与最近输出；" +
+          "也可在容器终端手动运行 dsh web 验证环境。",
         danger = true,
       )
     }
@@ -296,26 +322,29 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
   }
 }
 
-/** 门屏 h1（.screen-heading h1）：三态文案与参考项目 conversation-gate 一致。 */
-private fun title(running: Boolean, launching: Boolean, stopping: Boolean) = when {
-  launching -> "正在进入对话"
+/** 门屏 h1（.screen-heading h1）：状态必须诚实——只有凭据就绪才叫「对话已就绪」。 */
+private fun title(ready: Boolean, running: Boolean, launching: Boolean, stopping: Boolean) = when {
+  launching -> "正在启动对话"
   stopping -> "正在停止运行环境"
-  running -> "对话已就绪"
-  else -> "对话已就绪"
+  ready -> "对话已就绪"
+  running -> "引擎运行中·等待凭据"
+  else -> "对话未运行"
 }
 
 /** launch-copy h2：状态句。 */
-private fun headline(running: Boolean, launching: Boolean, stopping: Boolean) = when {
+private fun headline(ready: Boolean, running: Boolean, launching: Boolean, stopping: Boolean) = when {
   launching -> "正在打开 Harness 对话"
   stopping -> "正在停止本机服务"
-  running -> "点击「进入对话」继续"
+  ready -> "点击「进入对话」继续"
+  running -> "正在获取带 token 的访问地址"
   else -> "点击「打开对话」开始"
 }
 
 /** launch-copy p：说明句。 */
-private fun detail(running: Boolean, launching: Boolean, stopping: Boolean) = when {
-  launching -> "正在启动本机 proot 容器与 dsh web，首次启动约需 10-30 秒…"
+private fun detail(ready: Boolean, running: Boolean, launching: Boolean, stopping: Boolean) = when {
+  launching -> "正在启动本机 proot 容器与 dsh web，首次启动约需 10-30 秒；凭据获取失败会自动重启引擎重试。"
   stopping -> "停止完成后即可重新打开对话。"
-  running -> "本机服务正在运行，打开后即可继续对话。"
+  ready -> "本机服务正在运行，打开后即可继续对话。"
+  running -> "引擎进程已在运行；若日志尾部凭据已过期，将自动重启引擎换新 token。"
   else -> "打开对话时才会启动本机服务；容器与运行环境已就绪。"
 }

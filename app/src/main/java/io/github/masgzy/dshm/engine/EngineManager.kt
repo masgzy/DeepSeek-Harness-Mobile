@@ -74,9 +74,13 @@ class EngineManager(private val context: Context) {
   val isRunnerAvailable: Boolean
     get() = prootRuntime.runnerAvailable()
 
-  /** 是否有存活的引擎进程（端口应答视为运行中）。 */
+  /** 是否有存活的引擎进程（端口应答或进程句柄存活视为运行中）。 */
   val isRunning: Boolean
     get() = (current?.isAlive == true) || EngineProbe.check()
+
+  /** dsh web 端口是否真的在应答（比 isRunning 更严格：进程活着 ≠ 服务就绪）。 */
+  val isServing: Boolean
+    get() = EngineProbe.check()
 
   /**
    * 启动引擎。幂等：已在运行则直接返回。
@@ -121,6 +125,9 @@ class EngineManager(private val context: Context) {
     )
     return try {
       AppLog.log("engine", "启动 dsh web (port=$port)")
+      // 完整 proot 启动命令落日志：用户反馈「proot 启动命令和结果啥的也没有」，
+      // 出问题时可对照命令逐段排查（不含敏感信息，token 由 dsh web 运行时生成）
+      AppLog.log("engine", "proot 命令: " + argv.joinToString(" "))
       engineLog.parentFile?.mkdirs()
       webUrl.value = null
       val builder = ProcessBuilder(argv)
@@ -128,6 +135,7 @@ class EngineManager(private val context: Context) {
       builder.redirectErrorStream(true)
       val process = builder.start()
       current = process
+      val startedAt = System.currentTimeMillis()
       // 管道逐行读取：落盘 engine.log + 解析带 token 的 webUrl。
       // dsh web 启动后 1-3 秒内即打印 URL；进程退出后 readLine 返回 null，线程自然结束。
       thread(isDaemon = true, name = "dsh-log") {
@@ -143,9 +151,21 @@ class EngineManager(private val context: Context) {
               }
             }
           }
-          AppLog.log("engine", "引擎输出流已关闭（进程退出）")
         } catch (t: Throwable) {
           AppLog.log("engine", "引擎日志读取线程异常", t)
+        }
+      }
+      // 退出码观察者：进程退出（自然停止/崩溃/启动即退）一律记录 exit 码；
+      // 启动后 90s 内退出视为异常，转存 engine.log 尾部帮助定位（反馈：
+      // 「引擎到底启动了吗全靠猜」——现在退出码 + 尾部输出直接可见）
+      thread(isDaemon = true, name = "dsh-watch") {
+        val code = runCatching { process.waitFor() }.getOrDefault(-1)
+        if (current === process) current = null
+        val elapsedS = (System.currentTimeMillis() - startedAt) / 1000
+        AppLog.log("engine", "引擎进程已退出（exit=$code，存活 ${elapsedS}s）")
+        if (elapsedS < 90) {
+          AppLog.log("engine", "引擎快速退出，最近输出：")
+          AppLog.tail(engineLog, 12).forEach { AppLog.log("engine", "│ $it") }
         }
       }
       true
@@ -153,6 +173,18 @@ class EngineManager(private val context: Context) {
       AppLog.log("engine", "引擎启动失败", t)
       false
     }
+  }
+
+  /**
+   * 重启引擎（停止 + 再启动）：端口仍应答但 token 失效（401）时唯一可行的自愈
+   * 手段 —— dsh web 的带 token 地址只打印在启动 stdout，旧进程不会重新打印，
+   * 干等永远拿不到新凭据。由 AppViewModel 在凭据等待超时后调用。
+   */
+  @Synchronized
+  fun restartEngine(port: Int = Paths.DSH_PORT): Boolean {
+    AppLog.log("engine", "重启引擎（获取新 token）")
+    stopEngine()
+    return startEngine(port)
   }
 
   /**
