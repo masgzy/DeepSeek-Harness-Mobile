@@ -58,6 +58,8 @@ import io.github.masgzy.dshm.ui.components.InstallLogBlock
 import io.github.masgzy.dshm.ui.components.InstallSteps
 import io.github.masgzy.dshm.ui.components.NodeVersionPickerDialog
 import io.github.masgzy.dshm.ui.components.Phases
+import io.github.masgzy.dshm.ui.components.PnpmMajorPickerDialog
+import io.github.masgzy.dshm.ui.components.PnpmMethodPickerDialog
 import io.github.masgzy.dshm.ui.components.PrimaryButton
 import io.github.masgzy.dshm.ui.components.ProgressBlock
 import io.github.masgzy.dshm.ui.components.ScreenHeading
@@ -90,6 +92,8 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
   var showDistroPicker by remember { mutableStateOf(false) }
   var showNodePicker by remember { mutableStateOf(false) }
   var showDshPicker by remember { mutableStateOf(false) }
+  var showPnpmMajorPicker by remember { mutableStateOf(false) }
+  var showPnpmMethodPicker by remember { mutableStateOf(false) }
   // distro/版本选择变化时重组（非 State 属性，需手动触发）
   var selectionEpoch by remember { mutableStateOf(0) }
   val distro = remember(selectionEpoch) { viewModel.distro }
@@ -339,6 +343,14 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             title = "dsh 版本",
             value = if (viewModel.dshVersion.isBlank()) "跟随 npm latest" else viewModel.dshVersion,
           ) { showDshPicker = true }
+          RuntimePickersRow(
+            title = "pnpm 版本",
+            value = "v${viewModel.pnpmMajor}" + if (viewModel.pnpmMajor == "12") "（Rust，推荐）" else "",
+          ) { showPnpmMajorPicker = true }
+          RuntimePickersRow(
+            title = "pnpm 安装方式",
+            value = pnpmMethodLabel(viewModel.pnpmMethod),
+          ) { showPnpmMethodPicker = true }
         }
       }
     }
@@ -405,6 +417,19 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
       selectionEpoch++
     }
   }
+  if (showPnpmMajorPicker) {
+    PnpmMajorPickerDialog(viewModel) { showPnpmMajorPicker = false }
+  }
+  if (showPnpmMethodPicker) {
+    PnpmMethodPickerDialog(viewModel) { showPnpmMethodPicker = false }
+  }
+}
+
+/** pnpm 安装方式的展示文案。 */
+internal fun pnpmMethodLabel(method: String): String = when (method) {
+  "getpnpm" -> "get-pnpm 官方自举"
+  "script" -> "一键脚本（大陆适配）"
+  else -> "npm 直装（推荐）"
 }
 
 /** 已安装容器的 Node 实际版本（读标记；读不到时回退当前选择）。 */
