@@ -261,22 +261,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   // ---- 引擎控制 ----
   fun startEngine(onDone: ((ok: Boolean) -> Unit)? = null) {
     viewModelScope.launch(Dispatchers.IO) {
-      val ok = engineManager.startEngine(port)
+      var ok = engineManager.startEngine(port)
       if (ok) EngineService.start(getApplication())
-      var waited = 0
-      // 轮询等待 Web UI 就绪（最多 60s）：以「带 token 的 webUrl 解析完成」为就绪标准，
-      // 只探测端口会把 401 拒答误判为可用，WebView 随即撞上认证错误页。
-      // 等待期间同步从日志尾部补解析：覆盖 APP 重启后附着到仍在运行引擎的场景
-      // （此时 stdout 管道读者已不在，webUrl 流不会自发更新，不能干等 60s）。
-      while (ok && waited < 60_000 && EngineManager.webUrl.value == null) {
-        Thread.sleep(1_000)
-        waited += 1_000
-        if (waited % 3_000 == 0) resolveWebUrlFromLog()
-      }
-      // 端口就绪但 URL 始终没打出来（异常场景）：退回端口探测结果，别让按钮悬空。
+      ok = waitCredentials(ok, maxWait = 60_000)
+      // 自愈：进程活着但 60s 仍拿不到有效凭据（token 失效 401 / dsh web 未打印）
+      // → 重启引擎换新 token 再等一轮；干等只会永远停在「获取凭据中」
       if (ok && EngineManager.webUrl.value == null && engineManager.isRunning) {
-        AppLog.log("vm", "端口已应答但未捕获 token URL，尝试从日志尾部解析")
-        resolveWebUrlFromLog()
+        AppLog.log("vm", "60s 未获取有效凭据，自动重启引擎换新 token…")
+        ok = engineManager.restartEngine(port)
+        if (ok) EngineService.start(getApplication())
+        ok = waitCredentials(ok, maxWait = 45_000)
       }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning} url=${EngineManager.webUrl.value != null}")
@@ -285,14 +279,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   /**
+   * 重启引擎并等待凭据就绪：供「引擎活着但凭据过期」的附着场景使用
+   * （APP 冷启动后端口仍在应答、但日志尾部 token 已失效 —— 此时点击
+   * 「进入对话」由门屏轮询触发本方法，干等旧 token 永远 401）。
+   */
+  fun restartEngine(onDone: ((ok: Boolean) -> Unit)? = null) {
+    viewModelScope.launch(Dispatchers.IO) {
+      var ok = engineManager.restartEngine(port)
+      if (ok) EngineService.start(getApplication())
+      ok = waitCredentials(ok, maxWait = 60_000)
+      withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
+      onDone?.let { withContext(Dispatchers.Main) { it(ok) } }
+    }
+  }
+
+  /** 轮询等待 webUrl 就绪（阻塞 IO 线程）；等待期间定期从日志尾部补解析。 */
+  private suspend fun waitCredentials(ok: Boolean, maxWait: Long): Boolean {
+    var waited = 0
+    // 以「带 token 的 webUrl 解析完成」为就绪标准：只探测端口会把 401 拒答
+    // 误判为可用，WebView 随即撞上认证错误页。
+    while (ok && waited < maxWait && EngineManager.webUrl.value == null) {
+      Thread.sleep(1_000)
+      waited += 1_000
+      if (waited % 3_000 == 0) resolveWebUrlFromLog()
+    }
+    return ok
+  }
+
+  /**
    * 从引擎日志尾部解析带 token 的 webUrl（engine.log 为追加式，尾部即最新会话）。
-   * 引擎重启换新 token 后，新地址打印在日志更靠后的位置，解析结果自然更新。
+   * 解析结果必须经 [EngineProbe.checkUrlDetailed] 活性验证后才发布。
    *
-   * 解析结果必须经 [EngineProbe.checkUrl] 活性验证后才发布：APP 重启后附着到
-   * 存活引擎时，日志尾部可能是上一轮会话的过期 token（401 refused 的根源），
-   * 直接采用会让 WebView 撞凭据错误页。验证含本机网络 I/O，全程 IO 线程。
+   * 失败日志按「原因 + 限流」输出：同一原因 30s 内只记一次（此前每 2s 刷一条
+   * 「凭据已失效」把日志页刷屏，且用户看不懂它在说什么）；原因变化时立即记录。
+   * 各原因的可读文案自带下一步动作，不再是无解释的等待。
    */
   private val urlVerifyInFlight = AtomicBoolean(false)
+  private var lastCredFailLogAt = 0L
+  private var lastCredFailReason: String? = null
 
   fun resolveWebUrlFromLog() {
     // 去重：轮询/启动等待/手动点击可能并发触发，一次只跑一个验证
@@ -300,15 +324,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     viewModelScope.launch(Dispatchers.IO) {
       try {
         val candidate = EngineManager.webUrlFromLog(engineManager.engineLog)
-        if (candidate == null || candidate == EngineManager.webUrl.value) return@launch
-        if (EngineProbe.checkUrl(candidate)) {
-          EngineManager.webUrl.value = candidate
-          AppLog.log("vm", "日志尾部 URL 验证通过，凭据就绪")
-        } else {
-          AppLog.log("vm", "日志尾部 URL 凭据已失效（401/不可达），等待引擎打印新地址")
+        if (candidate == null) {
+          credFailLog("日志尾部未找到带 token 的地址（引擎尚未打印）")
+          return@launch
+        }
+        if (candidate == EngineManager.webUrl.value) return@launch
+        when (EngineProbe.checkUrlDetailed(candidate)) {
+          EngineProbe.UrlCheck.OK -> {
+            EngineManager.webUrl.value = candidate
+            lastCredFailReason = null
+            AppLog.log("vm", "日志尾部 URL 验证通过，凭据就绪")
+          }
+          EngineProbe.UrlCheck.STALE_TOKEN -> credFailLog(
+            "日志尾部 token 已失效（401：引擎换过 token 或已被占用），等待或触发引擎重启获取新地址",
+          )
+          EngineProbe.UrlCheck.UNREACHABLE -> credFailLog(
+            "日志尾部地址不可达（端口未监听：引擎可能未启动或已退出）",
+          )
+          EngineProbe.UrlCheck.HTTP_ERROR -> credFailLog(
+            "日志尾部地址响应异常（非 2xx/401，详见引擎日志）",
+          )
         }
       } finally {
         urlVerifyInFlight.set(false)
+      }
+    }
+  }
+
+  /** 凭据失败日志限流：同一原因 30s 一条；原因切换立即记录。 */
+  private fun credFailLog(message: String) {
+    val now = System.currentTimeMillis()
+    synchronized(this) {
+      val sameReason = lastCredFailReason == message
+      if (!sameReason || now - lastCredFailLogAt >= 30_000) {
+        lastCredFailReason = message
+        lastCredFailLogAt = now
+        AppLog.log("vm", message)
       }
     }
   }
@@ -346,7 +397,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       withContext(Dispatchers.Main) { _engineRunning.value = running }
     }
   }
-
   /** 把异常链展开成可读的错误文案（UI 直接展示，不再只给最后一层 message）。 */
   private fun describe(t: Throwable): String = buildString {
     append(t.message ?: t.javaClass.simpleName)

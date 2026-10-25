@@ -4,23 +4,28 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -31,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,7 +46,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.view.TerminalView
 import io.github.masgzy.dshm.terminal.DshmTerminalClient
 import io.github.masgzy.dshm.terminal.TerminalHolder
-import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
+import kotlinx.coroutines.delay
 
 /**
  * 容器终端（轻量）：proot 容器内 /bin/bash 的交互终端。
@@ -50,23 +57,32 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
  * 见 [EXTRA_KEYS_ROWS]）：
  *  - 字面量键直接写入 pty；
  *  - ESC/TAB/ENTER/HOME/END/PGUP/PGDN/方向键发送对应转义序列；
- *  - CTRL/ALT/FN 为粘滞修饰键：点亮后作用于下一次按键（Ctrl+C / Alt+. /
- *    Fn+数字=F1-F12），IME 与硬键盘路径由 TerminalView 轮询同款状态。
+ *  - CTRL/ALT/FN 为粘滞修饰键：点按点亮（一次）、长按锁定（跨键）、按住即生效，
+ *    IME 与硬键盘路径由 TerminalView 轮询同款状态。
+ *
+ * 配色对齐用户反馈：整屏纯黑（终端区 = 快捷键条 = #000000 无色差）、顶栏
+ * 白色高对比；快捷键条经 safeDrawing 底部边距随软键盘上浮（键盘弹出时
+ * 恰好贴在键盘上沿，收起时贴导航栏）。
  */
 @Composable
 fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () -> Unit) {
-  val p = LocalDshmPalette.current
   val context = LocalContext.current
   // 进程级共享 client：会话回调（onTextChanged→重绘）必须命中本屏 view，
   // 详见 TerminalHolder.sharedClient 注释
   val client = remember { TerminalHolder.sharedClient }
   var sessionState by remember { mutableStateOf(TerminalHolder.current()) }
   var attachedId by remember { mutableStateOf(0) }
-  // 修饰键点亮态（UI 反馈；真实状态在 client 的 AtomicBoolean）
-  var ctrlOn by remember { mutableStateOf(false) }
-  var altOn by remember { mutableStateOf(false) }
-  var fnOn by remember { mutableStateOf(false) }
+  // 修饰键 UI 态：(点亮, 锁定)；真实状态在 client 的 AtomicBoolean，这里只镜像
+  var ctrlUi by remember { mutableStateOf(false to false) }
+  var altUi by remember { mutableStateOf(false to false) }
+  var fnUi by remember { mutableStateOf(false to false) }
   var bootError by remember { mutableStateOf<String?>(null) }
+
+  fun syncModifiers() {
+    ctrlUi = client.modifierState("CTRL")
+    altUi = client.modifierState("ALT")
+    fnUi = client.modifierState("FN")
+  }
 
   fun refreshSession() {
     val s = TerminalHolder.obtain(context, client)
@@ -85,7 +101,7 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
     }
   }
 
-  // 进入时开 会话；会话退出时更新状态
+  // 进入时开会话；会话退出时更新状态
   LaunchedEffect(Unit) { refreshSession() }
   // 会话变化 → 挂到当前 view（attachedId 防重入；update 块仅在重组时触发，
   // 这里补充一条响应式路径，保证会话创建/替换后立即挂载）
@@ -104,6 +120,14 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
       client.view = null
     }
   }
+  // 修饰键态镜像轮询：IME 路径的消费发生在 TerminalView 内部（不经本屏回调），
+  // 轻量轮询保证点亮/熄灭/锁定视觉始终与真实状态一致
+  LaunchedEffect(Unit) {
+    while (true) {
+      delay(120)
+      syncModifiers()
+    }
+  }
 
   fun sendToSession(data: ByteArray) {
     val s = sessionState ?: return
@@ -113,10 +137,10 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
   Box(
     Modifier
       .fillMaxSize()
-      .background(p.terminalBg),
+      .background(TerminalScreenBg),
   ) {
     Column(Modifier.fillMaxSize()) {
-      // ---- 顶栏：返回 + 标题 + 新会话（单行，不放状态文案，终端尽量占满） ----
+      // ---- 顶栏：返回 + 标题 + 新会话（白色高对比；不放状态文案，终端尽量占满） ----
       Row(
         Modifier
           .fillMaxWidth()
@@ -128,21 +152,21 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
           Icon(
             Icons.AutoMirrored.Outlined.ArrowBack,
             "返回",
-            tint = MaterialTheme.colorScheme.onSurface,
+            tint = TerminalTopBarFg,
           )
         }
         Text(
           "容器终端",
           fontSize = 16.sp,
           fontWeight = FontWeight.SemiBold,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = TerminalTopBarFg,
           modifier = Modifier.weight(1f),
         )
         IconButton(onClick = {
           TerminalHolder.close()
           refreshSession()
         }) {
-          Icon(Icons.Outlined.Refresh, "新会话", tint = MaterialTheme.colorScheme.onSurface)
+          Icon(Icons.Outlined.Refresh, "新会话", tint = TerminalTopBarFg)
         }
       }
 
@@ -198,31 +222,31 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
               bootError ?: "",
               fontSize = 13.sp,
               lineHeight = 19.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = TerminalTopBarFg,
             )
           }
         }
       }
 
-      // ---- 快捷键条（Termux extra-keys 同款：纯黑底、无边框纯文字键） ----
+      // ---- 快捷键条（Termux extra-keys 同款；随软键盘上浮） ----
       ExtraKeysBar(
-        ctrlOn = ctrlOn,
-        altOn = altOn,
-        fnOn = fnOn,
-        onToggleModifier = { m ->
-          when (m) {
-            "CTRL" -> { ctrlOn = !ctrlOn; client.ctrlActive.set(ctrlOn) }
-            "ALT" -> { altOn = !altOn; client.altActive.set(altOn) }
-            "FN" -> { fnOn = !fnOn; client.fnActive.set(fnOn) }
-          }
+        ctrlUi = ctrlUi,
+        altUi = altUi,
+        fnUi = fnUi,
+        onModifierTap = { mod ->
+          client.modifierTap(mod)
+          syncModifiers()
         },
+        onModifierLongPress = { mod ->
+          client.modifierLongPress(mod)
+          syncModifiers()
+        },
+        onModifierHold = { mod, held -> client.modifierHeld(mod, held) },
         onKey = { key ->
           sendKey(key, client, ::sendToSession)
           if (key.kind != ExtraKeyKind.MODIFIER) {
-            // 消费后同步 UI 态
-            ctrlOn = client.ctrlActive.get()
-            altOn = client.altActive.get()
-            fnOn = client.fnActive.get()
+            // 一次性粘滞被字面量键消费后同步熄灭
+            syncModifiers()
           }
         },
       )
@@ -294,7 +318,7 @@ data class ExtraKey(
 )
 
 /**
- * Termux extra-keys 三行布局（键位与展示符号对齐用户真机截图，见 upload/IMG_20261025_080032.jpg）：
+ * Termux extra-keys 三行布局（键位与展示符号对齐用户真机截图）：
  *
  * 第一行：ESC < > \ = ^ $ () {} [] ↵
  * 第二行：⇄ & ; / ~ % * HOME ↑ END PGUP
@@ -335,49 +359,64 @@ private fun parseExtraKey(token: String): ExtraKey = when (token) {
 
 /**
  * 快捷键条：Termux extra-keys 同款观感——纯黑底（与终端区无缝连体）、
- * 无边框无圆角的纯文字键、白字居中、长标签自动两行（HOME/PGUP 同款换行）、
- * 按下带默认涟漪；粘滞修饰键点亮时蓝字提示。
+ * 无边框无圆角的纯文字键、白字居中、长标签自动两行（HOME/PGUP 同款换行）；
+ * 粘滞修饰键：点亮 = 蓝字，锁定 = 蓝字加粗 + 底部短横条提示。
+ *
+ * 底部内边距取 safeDrawing 底部（系统导航栏与软键盘的并集/最大值）：
+ * 键盘弹出时条体恰好贴在键盘上沿（用户反馈「小键盘不会自动弹到键盘上方」），
+ * 键盘收起时贴导航栏——两个时刻都只有一层内边距，不叠加。
  */
 @Composable
 private fun ExtraKeysBar(
-  ctrlOn: Boolean,
-  altOn: Boolean,
-  fnOn: Boolean,
-  onToggleModifier: (String) -> Unit,
+  ctrlUi: Pair<Boolean, Boolean>,
+  altUi: Pair<Boolean, Boolean>,
+  fnUi: Pair<Boolean, Boolean>,
+  onModifierTap: (String) -> Unit,
+  onModifierLongPress: (String) -> Unit,
+  onModifierHold: (String, Boolean) -> Unit,
   onKey: (ExtraKey) -> Unit,
 ) {
   Column(
     Modifier
       .fillMaxWidth()
       .background(ExtraKeysBarColor)
-      .navigationBarsPadding(),
+      // 键盘弹出时随键盘上浮；收起时为导航栏高度
+      .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
   ) {
     EXTRA_KEYS_ROWS.forEach { row ->
       Row(Modifier.fillMaxWidth().height(46.dp)) {
         row.forEach { key ->
-          val active = when (key.modifier) {
-            "CTRL" -> ctrlOn
-            "ALT" -> altOn
-            "FN" -> fnOn
-            else -> false
-          }
-          Box(
-            Modifier
-              .weight(1f)
-              .fillMaxHeight()
-              .clickable { onKey(key) },
-            contentAlignment = Alignment.Center,
-          ) {
-            Text(
-              key.label,
-              fontSize = 15.sp,
-              lineHeight = 16.sp,
-              fontWeight = FontWeight.Normal,
-              color = if (active) ActiveModifierColor else ExtraKeyTextColor,
-              maxLines = 2,
-              softWrap = true,
-              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          if (key.kind == ExtraKeyKind.MODIFIER) {
+            ModifierKey(
+              key = key,
+              ui = when (key.modifier) {
+                "CTRL" -> ctrlUi
+                "ALT" -> altUi
+                else -> fnUi
+              },
+              onTap = onModifierTap,
+              onLongPress = onModifierLongPress,
+              onHold = onModifierHold,
             )
+          } else {
+            Box(
+              Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable { onKey(key) },
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                key.label,
+                fontSize = 15.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Normal,
+                color = ExtraKeyTextColor,
+                maxLines = 2,
+                softWrap = true,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+              )
+            }
           }
         }
       }
@@ -385,7 +424,68 @@ private fun ExtraKeysBar(
   }
 }
 
-// ---- 终端快捷键条配色（与 Termux 一致：纯黑底白字，与终端区无缝连体） ----
-private val ExtraKeysBarColor = androidx.compose.ui.graphics.Color(0xFF000000)
-private val ExtraKeyTextColor = androidx.compose.ui.graphics.Color(0xFFF2F3F5)
-private val ActiveModifierColor = androidx.compose.ui.graphics.Color(0xFF86ABFF)
+/**
+ * 修饰键（CTRL/ALT/FN）：点按 = 一次性粘滞开关；长按 = 锁定开关（跨多次按键
+ * 保持）；按住期间即时生效（另一只手点 IME 字母即组合键，物理修饰键手感）。
+ * RowScope 扩展：weight 需在行布局作用域内解析。
+ */
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.ModifierKey(
+  key: ExtraKey,
+  ui: Pair<Boolean, Boolean>,
+  onTap: (String) -> Unit,
+  onLongPress: (String) -> Unit,
+  onHold: (String, Boolean) -> Unit,
+) {
+  val mod = key.modifier ?: return
+  val (active, locked) = ui
+  Box(
+    Modifier
+      .weight(1f)
+      .fillMaxHeight()
+      .pointerInput(mod) {
+        detectTapGestures(
+          onPress = {
+            // 按下立即生效（视觉点亮由轮询同步）；抬起解除按住态
+            onHold(mod, true)
+            tryAwaitRelease()
+            onHold(mod, false)
+          },
+          onTap = { onTap(mod) },
+          onLongPress = { onLongPress(mod) },
+        )
+      },
+    contentAlignment = Alignment.Center,
+  ) {
+    Text(
+      key.label,
+      fontSize = 15.sp,
+      lineHeight = 16.sp,
+      fontWeight = if (locked) FontWeight.Bold else FontWeight.Normal,
+      color = if (active) ActiveModifierColor else ExtraKeyTextColor,
+      maxLines = 1,
+    )
+    if (locked) {
+      // 锁定态标识：键位底部的蓝色短横条
+      Box(
+        Modifier
+          .align(Alignment.BottomCenter)
+          .padding(bottom = 5.dp)
+          .height(2.dp)
+          .width(18.dp)
+          .background(ActiveModifierColor),
+      )
+    }
+  }
+}
+
+// ---- 终端配色（用户反馈：整屏统一纯黑，顶栏高对比可读） ----
+
+/** 终端区 + 快捷键条统一纯黑（两者此前有色差）。 */
+private val TerminalScreenBg = Color(0xFF000000)
+private val ExtraKeysBarColor = Color(0xFF000000)
+
+/** 顶栏图标与标题：纯黑底上的高对比白（此前跟随主题 onSurface，黑底上几乎不可见）。 */
+private val TerminalTopBarFg = Color(0xFFF2F3F5)
+private val ExtraKeyTextColor = Color(0xFFF2F3F5)
+private val ActiveModifierColor = Color(0xFF86ABFF)

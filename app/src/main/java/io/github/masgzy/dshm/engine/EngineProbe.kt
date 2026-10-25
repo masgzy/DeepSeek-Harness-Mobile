@@ -31,7 +31,19 @@ object EngineProbe {
    * 场景防旧 token 误入 WebView（否则表现为点进入对话即 refused）。
    * 必须在非主线程调用（网络 I/O）。
    */
-  fun checkUrl(url: String): Boolean {
+  fun checkUrl(url: String): Boolean = checkUrlDetailed(url) == UrlCheck.OK
+
+  /**
+   * URL 活性验证的细分结果：把「401/不可达」拆开，日志与自愈策略才有依据——
+   *  - [OK]：token 有效；
+   *  - [STALE_TOKEN]：端口有应答但凭据被拒（401/403）→ 引擎还活着，token 是旧的，
+   *    恢复手段是重启引擎生成新 token；
+   *  - [UNREACHABLE]：端口根本没监听 → 引擎未启动或已退出；
+   *  - [HTTP_ERROR]：其他 HTTP 状态（罕见，原样呈现状态码）。
+   */
+  enum class UrlCheck { OK, STALE_TOKEN, UNREACHABLE, HTTP_ERROR }
+
+  fun checkUrlDetailed(url: String): UrlCheck {
     var conn: HttpURLConnection? = null
     return try {
       conn = URL(url).openConnection() as HttpURLConnection
@@ -39,9 +51,13 @@ object EngineProbe {
       conn.readTimeout = 3_000
       conn.requestMethod = "GET"
       conn.instanceFollowRedirects = false
-      conn.responseCode in 200..399
+      when (conn.responseCode) {
+        in 200..399 -> UrlCheck.OK
+        401, 403 -> UrlCheck.STALE_TOKEN
+        else -> UrlCheck.HTTP_ERROR
+      }
     } catch (_: Exception) {
-      false
+      UrlCheck.UNREACHABLE
     } finally {
       conn?.disconnect()
     }

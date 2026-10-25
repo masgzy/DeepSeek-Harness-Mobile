@@ -124,7 +124,9 @@ class ProotRuntime(private val context: Context) {
     add("LANG=C.UTF-8")
     add("TERM=xterm-256color")
     add("SHELL=/bin/bash")
-    add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    // pnpm 全局 bin（$PNPM_HOME/bin）纳入 PATH 兜底：bootstrap 正常会把 dsh 软链到
+    // /usr/local/bin，但自定义镜像/老安装标记下可能缺失，多一个搜索点无害
+    add("PATH=/root/.local/share/pnpm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
     for (e in envPairs) add(e)
     addAll(command)
   }
