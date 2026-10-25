@@ -108,7 +108,7 @@ META_FILE="$TMP/meta.json"
 fetch "$PNPM_REGISTRY/$ENCODED_PKG/$VER" "$META_FILE" \
   || fail "平台包元数据拉取失败: $PLATFORM_PKG@$VER"
 INTEGRITY_B64="$(tr ',{}' '\n' < "$META_FILE" | grep '"integrity"' | head -n1 | sed 's/.*"integrity":"\([^"]*\)".*/\1/')"
-TARBALL_NAME="$(tr ',{}' '\n' < "$META_FILE" | grep '"tarball"' | head -n1 | sed 's/.*\///')"
+TARBALL_NAME="$(tr ',{}' '\n' < "$META_FILE" | grep '"tarball"' | head -n1 | sed 's/.*\///' | tr -d '"')"
 [ -n "$INTEGRITY_B64" ] || fail "元数据缺少 dist.integrity"
 [ -n "$TARBALL_NAME" ] || fail "元数据缺少 dist.tarball"
 EXPECT_HEX="$(b64_to_hex "${INTEGRITY_B64#sha512-}")"
@@ -127,19 +127,45 @@ if [ "$ACTUAL_HEX" != "$EXPECT_HEX" ]; then
 fi
 log "SHA-512 校验通过"
 
-# ---- 6. 解包安装 ----
-mkdir -p "$TMP/unpack"
-tar -xzf "$TGZ" -C "$TMP/unpack"
-BIN="$(find "$TMP/unpack" -type f -name pnpm | head -n1)"
+# ---- 6. 解包安装（保留包内完整结构：v11 为 pkg 打包，运行时依赖包内 dist/） ----
+rm -rf "$PNPM_HOME/lib"
+mkdir -p "$PNPM_HOME/lib"
+tar -xzf "$TGZ" -C "$PNPM_HOME/lib"
+BIN="$PNPM_HOME/lib/package/pnpm"
+[ -f "$BIN" ] || BIN="$(find "$PNPM_HOME/lib" -type f -name pnpm | head -n1)"
 [ -n "$BIN" ] || fail "tarball 内未找到 pnpm 可执行文件"
-mkdir -p "$PNPM_HOME"
-cp "$BIN" "$PNPM_HOME/pnpm"
-chmod 0755 "$PNPM_HOME/pnpm"
-"$PNPM_HOME/pnpm" --version >/dev/null 2>&1 \
+
+# ---- 6.5 v11-：合并 pnpm 主包的 dist/（平台二进制运行时依赖，官方脚本同款双包；
+#      v12 平台包自包含无需此步）。主包 bin/pnpm 是 JS shim，须防覆盖二进制。 ----
+if [ "$MAJOR" -lt 12 ]; then
+  PMETA="$TMP/pnpm-meta.json"
+  fetch "$PNPM_REGISTRY/pnpm/$VER" "$PMETA" || fail "pnpm 主包元数据拉取失败: pnpm@$VER"
+  PINTEG="$(tr ',{}' '\n' < "$PMETA" | grep '"integrity"' | head -n1 | sed 's/.*"integrity":"\([^"]*\)".*/\1/')"
+  PTARBALL="$(tr ',{}' '\n' < "$PMETA" | grep '"tarball"' | head -n1 | sed 's/.*\///' | tr -d '"')"
+  [ -n "$PINTEG" ] || fail "pnpm 主包元数据缺少 integrity"
+  [ -n "$PTARBALL" ] || fail "pnpm 主包元数据缺少 tarball"
+  PHEX="$(b64_to_hex "${PINTEG#sha512-}")"
+  [ "${#PHEX}" = "128" ] || fail "pnpm 主包 integrity 解码异常"
+  log "下载 pnpm 主包（dist/）: $PTARBALL ..."
+  fetch "$PNPM_REGISTRY/pnpm/-/$PTARBALL" "$TMP/pnpm-main.tgz" || fail "pnpm 主包下载失败"
+  [ "$(sha512sum "$TMP/pnpm-main.tgz" | cut -d' ' -f1)" = "$PHEX" ] \
+    || fail "pnpm 主包 SHA-512 校验失败"
+  mkdir -p "$TMP/mainpkg"
+  tar -xzf "$TMP/pnpm-main.tgz" -C "$TMP/mainpkg"
+  mv "$BIN" "$TMP/pnpm-bin"
+  cp -R "$TMP/mainpkg/package/." "$PNPM_HOME/lib/package/"
+  mv "$TMP/pnpm-bin" "$BIN"
+  log "pnpm 主包 dist 已合并"
+fi
+
+chmod 0755 "$BIN"
+"$BIN" --version >/dev/null 2>&1 \
   || fail "安装后 pnpm --version 执行失败（架构/ABI 不符？）"
-log "pnpm $("$PNPM_HOME/pnpm" --version) 就绪: $PNPM_HOME/pnpm"
+log "pnpm $("$BIN" --version) 就绪: $BIN"
 
 # ---- 7. 统一符号链接（保证引擎/插件管理 PATH 可达） ----
+# 惯例入口 $PNPM_HOME/pnpm + 系统 PATH 入口 /usr/local/bin/pnpm
+ln -sf "$BIN" "$PNPM_HOME/pnpm"
 mkdir -p /usr/local/bin
 ln -sf "$PNPM_HOME/pnpm" /usr/local/bin/pnpm
-log "已链接 /usr/local/bin/pnpm -> $PNPM_HOME/pnpm"
+log "已链接 /usr/local/bin/pnpm -> $BIN"
