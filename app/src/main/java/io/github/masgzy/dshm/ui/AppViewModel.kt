@@ -272,6 +272,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (ok) EngineService.start(getApplication())
         ok = waitCredentials(ok, maxWait = 45_000)
       }
+      // 进程拉起但已退出（启动即崩）：按失败收场，让门屏立刻给出明确错误
+      if (ok && !engineManager.isRunning) {
+        AppLog.log("vm", "引擎进程已退出（exit 码见引擎日志），按启动失败收场")
+        ok = false
+      }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning} url=${EngineManager.webUrl.value != null}")
       onDone?.let { withContext(Dispatchers.Main) { it(ok) } }
@@ -288,6 +293,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       var ok = engineManager.restartEngine(port)
       if (ok) EngineService.start(getApplication())
       ok = waitCredentials(ok, maxWait = 60_000)
+      if (ok && !engineManager.isRunning) {
+        AppLog.log("vm", "引擎进程已退出（exit 码见引擎日志），按启动失败收场")
+        ok = false
+      }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       onDone?.let { withContext(Dispatchers.Main) { it(ok) } }
     }
