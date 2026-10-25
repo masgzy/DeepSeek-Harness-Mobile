@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -62,23 +61,22 @@ import io.github.masgzy.dshm.ui.theme.drawDshmBackground
 /**
  * 应用外壳：整版复刻 dphmoblie/deepseek-harness-android 的 app-shell——
  * 毛玻璃顶栏（96% 表面 + 下缘 1px 线，brand-symbol + deepseek + HARNESS 徽章 +
- * 全局阶段徽章 + 仅首页终端/设置钮）+ 底色双径向渐变的主内容 + 底部三项导航
+ * 全局阶段徽章 + 仅首页设置钮）+ 底色双径向渐变的主内容 + 底部三项导航
  * （首页 / 插件 / 设置，对齐参考项目；选中 accent 软底 12 圆角胶囊）。
  *
  * 未安装时只显示环境屏（安装引导与运行时管理一体）；装好后环境操作并入设置页。
  * dsh 对话走独立全屏 HarnessActivity；容器终端走独立全屏 TerminalScreen
- * （顶栏终端按钮进入，隐藏底部导航）。
+ * （入口在首页下方按钮，全屏时隐藏底部导航）。
  */
 @Composable
 fun AppRoot(viewModel: AppViewModel) {
   val p = LocalDshmPalette.current
   val setup by viewModel.setup.collectAsState()
   val engineRunning by viewModel.engineRunning.collectAsState()
-  val installed = viewModel.rootfsManager.isRootfsReady &&
-    (viewModel.engineManager.engineReady || setup.done)
+  val installed by viewModel.installedUi.collectAsState()
 
   if (!installed) {
-    // 首次引导：环境屏承担安装向导职责
+    // 首次引导：环境屏承担安装向导职责（装完 installedUi→true 自动流转正式界面）
     EnvironmentScreen(viewModel, isOnboarding = true)
     return
   }
@@ -124,9 +122,8 @@ fun AppRoot(viewModel: AppViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
               ) {
                 StatusBadge(phase)
-                // 首页右侧「终端」「应用设置」图标键（.header-settings 同形态）
+                // 首页右侧仅「应用设置」图标键（终端入口挪到首页下方，避免顶栏拥挤）
                 if (current == "home") {
-                  HeaderIconButton(Icons.Outlined.Terminal, "终端") { nav.navigate("terminal") { launchSingleTop = true } }
                   HeaderIconButton(Icons.Outlined.Settings, "应用设置") { goTo("settings") }
                 }
               }
@@ -148,7 +145,12 @@ fun AppRoot(viewModel: AppViewModel) {
           startDestination = "home",
           modifier = Modifier.fillMaxSize(),
         ) {
-          composable("home") { HomeScreen(viewModel) }
+          composable("home") {
+            HomeScreen(
+              viewModel,
+              onOpenTerminal = { nav.navigate("terminal") { launchSingleTop = true } },
+            )
+          }
           composable("plugins") { PluginsScreen(viewModel) }
           composable("settings") {
             SettingsScreen(

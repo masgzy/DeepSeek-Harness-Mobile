@@ -16,6 +16,15 @@ import io.github.masgzy.dshm.util.AppLog
  */
 object TerminalHolder {
 
+  /**
+   * 进程级共享客户端。TerminalSession 在构造时绑定 client 且终身不改（Termux 同款），
+   * 而会话本身跨屏幕存活（进程单例）——若每次进终端页都 new 一个 client，旧会话
+   * 仍回调首个 client，其 view 已随上一次页面销毁置空 → 输出到达却无人重绘，
+   * 表现为「敲命令没反应，退出重进才看到」。共享单例后，无论会话何时创建，
+   * 回调都命中本实例；view 引用由在屏的 TerminalScreen 随进/出页面挂上/摘下。
+   */
+  val sharedClient = DshmTerminalClient()
+
   @Volatile
   private var session: TerminalSession? = null
 
@@ -27,7 +36,7 @@ object TerminalHolder {
    * @return null = 前置条件不满足（rootfs 未就绪 / 运行器缺失）。
    */
   @Synchronized
-  fun obtain(context: Context, client: TerminalSessionClient): TerminalSession? {
+  fun obtain(context: Context, client: TerminalSessionClient = sharedClient): TerminalSession? {
     session?.let { if (it.isRunning) return it }
     val filesDir = context.filesDir
     val rootfsDir = Paths.rootfs(filesDir)

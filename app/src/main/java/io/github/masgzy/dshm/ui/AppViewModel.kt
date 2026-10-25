@@ -75,6 +75,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   private val _engineRunning = MutableStateFlow(false)
   val engineRunning: StateFlow<Boolean> = _engineRunning
 
+  /**
+   * 「已进入正式界面」判定（rootfs 就绪 && (dsh 就绪 || 安装向导完成)）。
+   * 显式状态化：AppRoot 直接以此切换环境屏/主界面，不再依赖重组时机的
+   * 文件读数 + StateFlow 时序组合——安装完成时 [installOfficial] 主动发布，
+   * 轮询路径 [refreshEngineState] 兼职兑底，任何一路到达都能完成流转。
+   */
+  private val _installedUi = MutableStateFlow(false)
+  val installedUi: StateFlow<Boolean> = _installedUi
+
+  /** 重算并发布安装态（文件态 + setup 状态合成；值不变时 StateFlow 自动去重）。 */
+  fun refreshInstalled() {
+    _installedUi.value =
+      rootfsManager.isRootfsReady && (engineManager.engineReady || _setup.value.done)
+  }
+
+  init {
+    refreshInstalled()
+  }
+
+  /**
+   * _setup 单写锁：安装期间 onLog/onProgress 可能从 proot 输出读取线程与安装
+   * 协程两条线程并发到达，读-改-写不串行会互相覆盖（末尾的 done=true 可能被
+   * 迟到的日志行写入覆盖回 done=false，正式界面不再流转）。所有 _setup 写入
+   * 一律经由本锁下的 [publishSetup]。
+   */
+  private val setupLock = Any()
+
+  private fun publishSetup(transform: (SetupState) -> SetupState) {
+    synchronized(setupLock) { _setup.value = transform(_setup.value) }
+  }
+
   /** dsh web 带 token 的访问地址（EngineManager 从引擎 stdout 实时解析）。 */
   val webUrl: StateFlow<String?> get() = EngineManager.webUrl
 
@@ -290,7 +321,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       io.github.masgzy.dshm.terminal.TerminalHolder.close()
       rootfsManager.uninstall()
       EngineManager.webUrl.value = null
-      _setup.value = SetupState()
+      publishSetup { SetupState() }
+      refreshInstalled()
       withContext(Dispatchers.Main) { _engineRunning.value = false }
       AppLog.log("vm", "运行环境已重置")
     }
@@ -305,10 +337,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   fun refreshEngineState() {
-    // 探测含网络 I/O，必须离开主线程；发现引擎存活但凭据未就绪时顺带预热解析
+    // 探测含网络 I/O，必须离开主线程；发现引擎存活但凭据未就绪时顺带预热解析；
+    // 顺带重算安装态（兑底：确保安装完成后正式界面流转必定到达）
     viewModelScope.launch(Dispatchers.IO) {
       val running = engineManager.isRunning
       if (running && EngineManager.webUrl.value == null) resolveWebUrlFromLog()
+      refreshInstalled()
       withContext(Dispatchers.Main) { _engineRunning.value = running }
     }
   }
@@ -334,7 +368,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val pnpmMajor = this.pnpmMajor
     val pnpmMethod = this.pnpmMethod
     viewModelScope.launch(Dispatchers.IO) {
-      _setup.value = SetupState(running = true, step = "准备安装")
+      publishSetup { SetupState(running = true, step = "准备安装") }
       try {
         // 首装前镜像测速（反馈：测速应该在安装时做）——apt/apk 未测过时自动
         // 执行并择优持久化，择优结果直接作为安装参数（写入 sources/apk 源）
@@ -362,16 +396,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
         // 首装完成即同步模型配置（用户可能在安装前就填好了 Key）
         modelConfig.sync()
-        _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
-        // 装完自动启动引擎预热 dsh web：消除「装完还要手动等 10-30s 启动」
-        // 的感知延迟；下次打开对话直接就绪
+        publishSetup { it.copy(running = false, done = true, step = "安装完成") }
+        // 装完即发布「已安装」状态 → AppRoot 流转到正式界面；随后后台预热引擎
+        refreshInstalled()
         appendLog("[setup] 安装完成，自动启动引擎预热（后台）...")
         val ok = engineManager.startEngine(port)
         if (ok) EngineService.start(getApplication())
         withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
+        refreshInstalled()
       } catch (t: Throwable) {
         AppLog.log("setup", "安装失败", t)
-        _setup.value = _setup.value.copy(running = false, error = describe(t))
+        publishSetup { it.copy(running = false, error = describe(t)) }
+        refreshInstalled()
       }
     }
   }
@@ -380,7 +416,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   fun installBundled() {
     if (_setup.value.running) return
     viewModelScope.launch(Dispatchers.IO) {
-      _setup.value = SetupState(running = true, step = "获取运行时清单")
+      publishSetup { SetupState(running = true, step = "获取运行时清单") }
       try {
         val manifest = updateManager.fetchManifest()
         appendLog("清单: v${manifest.version} node=${manifest.node} dsh=${manifest.dsh}")
@@ -390,22 +426,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!ok) throw RuntimeException("预装运行时启用失败，详见日志")
         // 预装路径同样补同步模型配置
         modelConfig.sync()
-        _setup.value = _setup.value.copy(running = false, done = true, step = "安装完成")
+        publishSetup { it.copy(running = false, done = true, step = "安装完成") }
+        refreshInstalled()
       } catch (t: Throwable) {
         AppLog.log("setup", "预装运行时安装失败", t)
-        _setup.value = _setup.value.copy(running = false, error = describe(t))
+        publishSetup { it.copy(running = false, error = describe(t)) }
+        refreshInstalled()
       }
     }
   }
 
   private fun updateProgress(step: String, done: Long, total: Long) {
     val frac = if (total > 0) (done.toDouble() / total).toFloat().coerceIn(0f, 1f) else null
-    _setup.value = _setup.value.copy(step = step, progress = frac)
+    publishSetup { it.copy(step = step, progress = frac) }
   }
 
   private fun appendLog(line: String) {
     // 上限 500 条（UI 固定高度可滚动展示，避免长安装日志被过早裁剪）
-    val lines = (_setup.value.logLines + line).takeLast(500)
-    _setup.value = _setup.value.copy(logLines = lines)
+    publishSetup { it.copy(logLines = (it.logLines + line).takeLast(500)) }
   }
 }

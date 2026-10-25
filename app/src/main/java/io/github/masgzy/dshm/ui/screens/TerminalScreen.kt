@@ -3,21 +3,18 @@ package io.github.masgzy.dshm.ui.screens
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
@@ -28,16 +25,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,7 +39,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.view.TerminalView
 import io.github.masgzy.dshm.terminal.DshmTerminalClient
 import io.github.masgzy.dshm.terminal.TerminalHolder
-import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 
 /**
@@ -53,7 +46,8 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
  *
  * 终端内核取自 Termux terminal-emulator/terminal-view（Apache-2.0，仅 20 个
  * 渲染/PTY 源文件 + 15KB libtermux.so，无任何 termux 运行时/包管理）；
- * 快捷键菜单复刻 ZeroTermux extra-keys 三行配置（见 [EXTRA_KEYS_ROWS]）：
+ * 快捷键条复刻 Termux extra-keys 三行布局（键位与样式对齐用户真机截图，
+ * 见 [EXTRA_KEYS_ROWS]）：
  *  - 字面量键直接写入 pty；
  *  - ESC/TAB/ENTER/HOME/END/PGUP/PGDN/方向键发送对应转义序列；
  *  - CTRL/ALT/FN 为粘滞修饰键：点亮后作用于下一次按键（Ctrl+C / Alt+. /
@@ -63,7 +57,9 @@ import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () -> Unit) {
   val p = LocalDshmPalette.current
   val context = LocalContext.current
-  val client = remember { DshmTerminalClient() }
+  // 进程级共享 client：会话回调（onTextChanged→重绘）必须命中本屏 view，
+  // 详见 TerminalHolder.sharedClient 注释
+  val client = remember { TerminalHolder.sharedClient }
   var sessionState by remember { mutableStateOf(TerminalHolder.current()) }
   var attachedId by remember { mutableStateOf(0) }
   // 修饰键点亮态（UI 反馈；真实状态在 client 的 AtomicBoolean）
@@ -71,7 +67,6 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
   var altOn by remember { mutableStateOf(false) }
   var fnOn by remember { mutableStateOf(false) }
   var bootError by remember { mutableStateOf<String?>(null) }
-  val engineRunning by viewModel.engineRunning.collectAsState()
 
   fun refreshSession() {
     val s = TerminalHolder.obtain(context, client)
@@ -92,6 +87,16 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
 
   // 进入时开 会话；会话退出时更新状态
   LaunchedEffect(Unit) { refreshSession() }
+  // 会话变化 → 挂到当前 view（attachedId 防重入；update 块仅在重组时触发，
+  // 这里补充一条响应式路径，保证会话创建/替换后立即挂载）
+  LaunchedEffect(sessionState) {
+    val v = client.view ?: return@LaunchedEffect
+    val s = sessionState ?: return@LaunchedEffect
+    if (System.identityHashCode(s) != attachedId) {
+      v.attachSession(s)
+      attachedId = System.identityHashCode(s)
+    }
+  }
   DisposableEffect(Unit) {
     client.onSessionFinished = { sessionState = TerminalHolder.current() }
     onDispose {
@@ -111,7 +116,7 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
       .background(p.terminalBg),
   ) {
     Column(Modifier.fillMaxSize()) {
-      // ---- 顶栏：返回 + 标题 + 状态 + 新会话 ----
+      // ---- 顶栏：返回 + 标题 + 新会话（单行，不放状态文案，终端尽量占满） ----
       Row(
         Modifier
           .fillMaxWidth()
@@ -126,24 +131,13 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
             tint = MaterialTheme.colorScheme.onSurface,
           )
         }
-        Column(Modifier.weight(1f)) {
-          Text(
-            "容器终端",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-          )
-          Text(
-            when {
-              bootError != null -> "不可用"
-              sessionState?.isRunning == true -> "bash · /root · arm64 容器内" +
-                if (engineRunning) " · 引擎运行中" else ""
-              else -> "会话已退出"
-            },
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
+        Text(
+          "容器终端",
+          fontSize = 16.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier = Modifier.weight(1f),
+        )
         IconButton(onClick = {
           TerminalHolder.close()
           refreshSession()
@@ -210,7 +204,7 @@ fun TerminalScreen(viewModel: io.github.masgzy.dshm.ui.AppViewModel, onBack: () 
         }
       }
 
-      // ---- 快捷键菜单（ZeroTermux extra-keys 三行配置） ----
+      // ---- 快捷键条（Termux extra-keys 同款：纯黑底、无边框纯文字键） ----
       ExtraKeysBar(
         ctrlOn = ctrlOn,
         altOn = altOn,
@@ -300,13 +294,11 @@ data class ExtraKey(
 )
 
 /**
- * ZeroTermux extra-keys 三行配置（用户提供，见 ZeroTermux #Application Configuration）：
+ * Termux extra-keys 三行布局（键位与展示符号对齐用户真机截图，见 upload/IMG_20261025_080032.jpg）：
  *
- * ```
- * extra-keys=[ ['ESC','<','>','BACKSLASH','\=','^','$','()','{}','[]','ENTER'],
- *              ['TAB','&',';','/','~','%','*','HOME','UP','END','PGUP'],
- *              ['CTRL','FN','ALT','|','-','+','QUOTE','LEFT','DOWN','RIGHT','PGDN'] ]
- * ```
+ * 第一行：ESC < > \ = ^ $ () {} [] ↵
+ * 第二行：⇄ & ; / ~ % * HOME ↑ END PGUP
+ * 第三行：CTRL FN ALT | - + " ← ↓ → PGDN
  */
 val EXTRA_KEYS_ROWS: List<List<ExtraKey>> = listOf(
   listOf("ESC", "<", ">", "BACKSLASH", "\\=", "^", "$", "()", "{}", "[]", "ENTER"),
@@ -318,12 +310,12 @@ val EXTRA_KEYS_ROWS: List<List<ExtraKey>> = listOf(
 private fun parseExtraKey(token: String): ExtraKey = when (token) {
   "CTRL", "ALT", "FN" -> ExtraKey(token, ExtraKeyKind.MODIFIER, modifier = token)
   "ESC" -> ExtraKey("ESC", ExtraKeyKind.SPECIAL, seq = "\u001B")
-  "TAB" -> ExtraKey("TAB", ExtraKeyKind.SPECIAL, seq = "\t")
-  "ENTER" -> ExtraKey("ENTER", ExtraKeyKind.SPECIAL, seq = "\r")
-  "UP" -> ExtraKey("▲", ExtraKeyKind.SPECIAL, seq = "\u001B[A")
-  "DOWN" -> ExtraKey("▼", ExtraKeyKind.SPECIAL, seq = "\u001B[B")
-  "LEFT" -> ExtraKey("◀", ExtraKeyKind.SPECIAL, seq = "\u001B[D")
-  "RIGHT" -> ExtraKey("▶", ExtraKeyKind.SPECIAL, seq = "\u001B[C")
+  "TAB" -> ExtraKey("\u21C4", ExtraKeyKind.SPECIAL, seq = "\t")
+  "ENTER" -> ExtraKey("\u21B5", ExtraKeyKind.SPECIAL, seq = "\r")
+  "UP" -> ExtraKey("\u2191", ExtraKeyKind.SPECIAL, seq = "\u001B[A")
+  "DOWN" -> ExtraKey("\u2193", ExtraKeyKind.SPECIAL, seq = "\u001B[B")
+  "LEFT" -> ExtraKey("\u2190", ExtraKeyKind.SPECIAL, seq = "\u001B[D")
+  "RIGHT" -> ExtraKey("\u2192", ExtraKeyKind.SPECIAL, seq = "\u001B[C")
   "HOME" -> ExtraKey("HOME", ExtraKeyKind.SPECIAL, seq = "\u001B[H")
   "END" -> ExtraKey("END", ExtraKeyKind.SPECIAL, seq = "\u001B[F")
   "PGUP" -> ExtraKey("PGUP", ExtraKeyKind.SPECIAL, seq = "\u001B[5~")
@@ -341,7 +333,11 @@ private fun parseExtraKey(token: String): ExtraKey = when (token) {
     }
 }
 
-/** 快捷键条：三行均分宽度小按键；修饰键点亮高亮。 */
+/**
+ * 快捷键条：Termux extra-keys 同款观感——纯黑底（与终端区无缝连体）、
+ * 无边框无圆角的纯文字键、白字居中、长标签自动两行（HOME/PGUP 同款换行）、
+ * 按下带默认涟漪；粘滞修饰键点亮时蓝字提示。
+ */
 @Composable
 private fun ExtraKeysBar(
   ctrlOn: Boolean,
@@ -350,20 +346,14 @@ private fun ExtraKeysBar(
   onToggleModifier: (String) -> Unit,
   onKey: (ExtraKey) -> Unit,
 ) {
-  val p = LocalDshmPalette.current
   Column(
     Modifier
       .fillMaxWidth()
-      .navigationBarsPadding()
-      .background(TerminalBarColor)
-      .padding(horizontal = 3.dp, vertical = 4.dp),
-    verticalArrangement = Arrangement.spacedBy(4.dp),
+      .background(ExtraKeysBarColor)
+      .navigationBarsPadding(),
   ) {
     EXTRA_KEYS_ROWS.forEach { row ->
-      Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-      ) {
+      Row(Modifier.fillMaxWidth().height(46.dp)) {
         row.forEach { key ->
           val active = when (key.modifier) {
             "CTRL" -> ctrlOn
@@ -371,36 +361,22 @@ private fun ExtraKeysBar(
             "FN" -> fnOn
             else -> false
           }
-          val bg = when {
-            active -> p.blue
-            key.kind == ExtraKeyKind.MODIFIER -> TerminalModifierKeyColor
-            else -> TerminalKeyColor
-          }
-          val fg = if (active) p.terminalBg else TerminalKeyTextColor
           Box(
             Modifier
               .weight(1f)
-              .height(36.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(bg)
-              .border(
-                1.dp,
-                if (active) p.blue else TerminalKeyLineColor,
-                RoundedCornerShape(6.dp),
-              )
-              .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-              ) { onKey(key) },
+              .fillMaxHeight()
+              .clickable { onKey(key) },
             contentAlignment = Alignment.Center,
           ) {
             Text(
               key.label,
-              fontSize = if (key.label.length > 2) 8.5.sp else 11.sp,
-              fontWeight = FontWeight.Medium,
-              fontFamily = if (key.label.length == 1) FontFamily.Monospace else null,
-              color = fg,
-              maxLines = 1,
+              fontSize = 15.sp,
+              lineHeight = 16.sp,
+              fontWeight = FontWeight.Normal,
+              color = if (active) ActiveModifierColor else ExtraKeyTextColor,
+              maxLines = 2,
+              softWrap = true,
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
           }
         }
@@ -409,9 +385,7 @@ private fun ExtraKeysBar(
   }
 }
 
-// ---- 终端快捷键条配色（终端区永远深色，条体固定深色系） ----
-private val TerminalBarColor = androidx.compose.ui.graphics.Color(0xFF141A21)
-private val TerminalKeyColor = androidx.compose.ui.graphics.Color(0xFF1E262F)
-private val TerminalModifierKeyColor = androidx.compose.ui.graphics.Color(0xFF253040)
-private val TerminalKeyLineColor = androidx.compose.ui.graphics.Color(0xFF2C3743)
-private val TerminalKeyTextColor = androidx.compose.ui.graphics.Color(0xFFD8DFE8)
+// ---- 终端快捷键条配色（与 Termux 一致：纯黑底白字，与终端区无缝连体） ----
+private val ExtraKeysBarColor = androidx.compose.ui.graphics.Color(0xFF000000)
+private val ExtraKeyTextColor = androidx.compose.ui.graphics.Color(0xFFF2F3F5)
+private val ActiveModifierColor = androidx.compose.ui.graphics.Color(0xFF86ABFF)
