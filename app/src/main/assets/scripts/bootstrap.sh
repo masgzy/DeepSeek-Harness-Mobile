@@ -49,8 +49,13 @@ PNPM_HOME="/root/.local/share/pnpm"
 log() { echo "[dshm-bootstrap] $*"; }
 fail() { echo "[dshm-bootstrap][FAIL] $*" >&2; exit 1; }
 
-log "=== DeepSeek Harness Mobile 容器引导开始 ==="
-log "distro=$DSHM_DISTRO_ID family=$DSHM_FAMILY | dsh: ${DSH_VERSION:-latest} | registry: $DSH_NPM_REGISTRY | pnpm: v$PNPM_MAJOR via $PNPM_METHOD"
+# Alpine 分支会 exec bash "$0" 重入，重入时只提示续跑，避免横幅重复刷屏
+if [ "${DSHM_ALPINE_READY:-}" = "1" ]; then
+  log "=== 引导继续（Alpine 基础环境已就绪）==="
+else
+  log "=== DeepSeek Harness Mobile 容器引导开始 ==="
+  log "distro=$DSHM_DISTRO_ID family=$DSHM_FAMILY | dsh: ${DSH_VERSION:-latest} | registry: $DSH_NPM_REGISTRY | pnpm: v$PNPM_MAJOR via $PNPM_METHOD"
+fi
 
 if [ -f "$MARKER" ]; then
   log "检测到安装标记，跳过（如需重装请先在 App 内卸载容器）"
@@ -150,6 +155,17 @@ install_pnpm_script() {
 }
 
 log "[2/5] 安装 pnpm v$PNPM_MAJOR（方式: $PNPM_METHOD）..."
+# pnpm 全局 bin 目录：v10+/v12 为 $PNPM_HOME/bin，旧版为 $PNPM_HOME 本身。
+# 必须在 pnpm add -g 之前把两者加入 PATH，否则非交互 shell 下 pnpm 12 会报
+# ERR_PNPM_GLOBAL_BIN_DIR_NOT_IN_PATH 直接中止（alpine3 真机实测复现）。
+# 提前导出也使 get-pnpm / 一键脚本安装路径确定一致。
+export PNPM_HOME
+for d in "$PNPM_HOME" "$PNPM_HOME/bin"; do
+  case ":$PATH:" in
+    *":$d:"*) ;;
+    *) export PATH="$d:$PATH" ;;
+  esac
+done
 hash -r
 case "$PNPM_METHOD" in
   getpnpm) install_pnpm_getpnpm || install_pnpm_npm ;;
@@ -157,9 +173,6 @@ case "$PNPM_METHOD" in
   *)       install_pnpm_npm ;;
 esac
 # 兜底定位：npm 装在 /usr/local/bin；get-pnpm/script 装在 $PNPM_HOME
-export PNPM_HOME
-export PATH="$PNPM_HOME:$PATH"
-hash -r
 if ! command -v pnpm >/dev/null 2>&1 && [ -x "$PNPM_HOME/pnpm" ]; then
   export PATH="$PNPM_HOME:$PATH"
 fi
@@ -173,12 +186,15 @@ ln -sf "$PNPM_REAL" /usr/local/bin/pnpm
 
 # ---- 3. pnpm 全局安装 @deepseek-ai/dsh（失败自动回退 npm） ----
 log "[3/5] pnpm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} ..."
-# --allow-build：pnpm 10+ 默认禁止依赖的生命周期脚本，koffi/node-pty 必须放行
-#（koffi 的 install 脚本优先加载 optional 预编译二进制，无需编译；node-pty 的
-#  预编译直接打包在 tarball 内）。探测支持后再加 flag，兼容旧版 pnpm。
+# --allow-build：pnpm 10+ 默认禁止依赖的生命周期脚本，必须放行：
+#   koffi                 install 脚本优先加载 optional 预编译二进制，无需编译
+#   node-pty              预编译直接打包在 tarball 内
+#   dsh-subprocess-local  postinstall 恢复 node-pty spawn-helper 可执行位
+#   @deepseek-ai/dsh      主包自身生命周期脚本
+# 探测支持后再加 flag，兼容旧版 pnpm。
 ALLOW_FLAGS=""
 if pnpm add --help 2>/dev/null | grep -q -- "--allow-build"; then
-  ALLOW_FLAGS="--allow-build=koffi --allow-build=node-pty --allow-build=@deepseek-ai/dsh"
+  ALLOW_FLAGS="--allow-build=koffi --allow-build=node-pty --allow-build=@deepseek-ai/dsh --allow-build=@deepseek-ai/dsh-subprocess-local"
 fi
 DSH_SPEC="@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
 if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS "$DSH_SPEC"; then
