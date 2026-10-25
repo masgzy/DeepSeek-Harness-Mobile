@@ -198,12 +198,13 @@ ln -sf "$PNPM_REAL" /usr/local/bin/pnpm
 # ---- 3. pnpm 全局安装 @deepseek-ai/dsh（失败自动回退 npm） ----
 log "[3/5] pnpm install -g @deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION} ..."
 # --node-linker=hoisted：npm 式平铺布局。pnpm 默认隔离布局（.pnpm + 符号链接）
-# 在 proot 下导致 koffi 预编译二进制加载失败（alpine3 真机三轮复现，而 npm
-# 平铺布局可用）；hoisted 与 npm 回退路径的目录结构完全一致，规避该问题。
+# 在 proot 下符号链接翻译层数多、行为脆弱；hoisted 与 npm 布局一致，路径解析
+# 全部走真实目录（第四轮沙箱 x86_64 musl 实测两种布局下 koffi 加载均正常）。
 # --allow-build：pnpm 10+ 默认禁止依赖的生命周期脚本。注意 koffi 不放行：
-#   其 install 脚本（cnoke --prebuild）只是"预编译可加载性"校验器，预编译
-#   可用时为空操作；加载失败时回退源码编译（容器无 CMake）→ 整个安装硬
-#   失败且真实错误被吞。改由安装完成后 bootstrap 亲自验证并输出真实错误。
+#   其 install 脚本（cnoke --prebuild）以子进程 require(koffi包) 做预编译校验，
+#   musl 真机上命中与下面 verify_koffi 完全相同的段错误 → cnoke 打印 "Failed
+#   to load prebuilt binary, rebuilding from source" → 无 CMake → 整个安装硬
+#   失败（第三轮真机证据）。改由安装完成后 bootstrap 亲自补丁 + 验证。
 #   其余放行：node-pty 预编译打包在 tarball 内（prebuild.js 落位）；
 #   dsh-subprocess-local 恢复 node-pty spawn-helper 可执行位；dsh 主包脚本。
 ALLOW_FLAGS=""
@@ -211,23 +212,179 @@ if pnpm add --help 2>/dev/null | grep -q -- "--allow-build"; then
   ALLOW_FLAGS="--allow-build=node-pty --allow-build=@deepseek-ai/dsh --allow-build=@deepseek-ai/dsh-subprocess-local"
 fi
 DSH_SPEC="@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
+
+KOFFI_LAST_ERR=""
+KOFFI_LADDER_OK=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 60"; else TIMEOUT=""; fi
+
+# koffi 加载验证：require 包目录（与 cnoke checkPrebuild 同法）。stderr 全量
+# 捕获到 KOFFI_LAST_ERR；段错误时 stderr 为空且退出码非零（shell 报 139）。
+verify_koffi() { # $1=koffi 包目录
+  KOFFI_LAST_ERR="$($TIMEOUT node -e "require(process.argv[1])" "$1" 2>&1 >/dev/null)" && return 0
+  return 1
+}
+
+koffi_print_err() {
+  if [ -n "$KOFFI_LAST_ERR" ]; then
+    printf '%s\n' "$KOFFI_LAST_ERR" | head -6 | sed 's/^/[dshm-bootstrap]     /'
+  else
+    log "    （stderr 为空且退出码非零 —— 进程被信号终止，如 Segmentation fault）"
+  fi
+}
+
+# musl 槽位补丁（仅 family=alpine）：把平台包内 musl 预编译二进制覆盖到 glibc
+# 槽位。koffi 3.1.1 加载链（平台包 index.js）：先 require ./linux_$ARCH/koffi.node
+# （glibc）→ 失败 → ./musl_$ARCH/koffi.node。真机（arm64 + Termux proot + musl）
+# 上第一次 glibc dlopen 尝试即让整个进程 Segmentation fault（三/四轮真机日志），
+# musl 变体从未获得执行机会。第四轮沙箱（x86_64 musl，有无 proot 两种环境）实
+# 测：glibc 尝试均"干净失败"（缺 libc.so.6/ld-linux），musl 加载与 FFI 调用全
+# 通过 —— 排除 musl 加载器本身的问题，真机元凶只能是 glibc 尝试在 arm64 ×
+# Termux proot × Android 内核组合下的行为。覆盖后首次尝试直接命中 musl 二进制，
+# 彻底绕开 glibc dlopen；加载逻辑对结果零影响（文件内容才是本质）。
+patch_koffi_musl() { # $1=koffi 包目录
+  [ "$DSHM_FAMILY" = "alpine" ] || return 0
+  local KDIR="$1" ARCH PLAT MUSL_BIN SLOT
+  ARCH="$(node -p process.arch 2>/dev/null)" || return 0
+  [ -n "$ARCH" ] || return 0
+  PLAT="$(dirname "$KDIR")/@koromix/koffi-linux-$ARCH"
+  if [ -f "$PLAT/musl_$ARCH/koffi.node" ]; then
+    MUSL_BIN="$PLAT/musl_$ARCH/koffi.node"
+  else
+    MUSL_BIN="$(find "$(dirname "$KDIR")" -type f -path "*koffi-linux-$ARCH/musl_$ARCH/koffi.node" 2>/dev/null | head -1 || true)"
+    if [ -z "$MUSL_BIN" ]; then
+      log "    未找到 musl_$ARCH 预编译二进制，跳过槽位补丁"
+      return 1
+    fi
+    PLAT="$(dirname "$(dirname "$MUSL_BIN")")"
+  fi
+  SLOT="$PLAT/linux_$ARCH/koffi.node"
+  if [ -f "$SLOT" ] && cmp -s "$MUSL_BIN" "$SLOT"; then
+    return 0
+  fi
+  if cp -f "$MUSL_BIN" "$SLOT" 2>/dev/null; then
+    log "    musl 槽位补丁：glibc 槽已覆盖为 musl 预编译二进制"
+    return 0
+  fi
+  log "    槽位覆盖失败: $SLOT"
+  return 1
+}
+
+# npm 回退安装（加固版）：--ignore-scripts 跳过全部依赖脚本 —— koffi 的
+# install 脚本（cnoke --prebuild）以子进程 require(koffi包) 校验，musl 真机
+# 上命中与 verify_koffi 相同的段错误 → "Failed to load prebuilt binary,
+# rebuilding from source" → 无 CMake → 硬失败（第三轮真机证据）。跳过后手动
+# 补三件必需脚本：koffi musl 槽位补丁、node-pty prebuild 落位、spawn-helper
+# 可执行位恢复。@deepseek-ai/dsh 主包无任何 scripts，--ignore-scripts 零影响。
+NPM_KOFFI_DIR=""
+npm_fallback() {
+  NPM_KOFFI_DIR=""
+  local NPMROOT PTY_DIR SUB_DIR
+  NPMROOT="$(npm root -g 2>/dev/null || echo /usr/local/lib/node_modules)"
+  # 预清理上次安装残留（重试安装场景必现）：/usr/local/bin/dsh bin 链接已
+  # 存在时 npm 直接 EEXIST 硬失败；半成品包目录同样会让 npm 拒装。
+  # 这些路径只属于 npm 全局命名空间，与 pnpm 全局安装（$PNPM_HOME）互不影响。
+  rm -f /usr/local/bin/dsh 2>/dev/null || true
+  rm -rf "$NPMROOT/@deepseek-ai/dsh" "$NPMROOT/koffi" "$NPMROOT/@koromix" "$NPMROOT/node-pty" 2>/dev/null || true
+  npm install -g --no-audit --no-fund --loglevel=notice --ignore-scripts "$DSH_SPEC" || return 1
+  NPM_KOFFI_DIR="$NPMROOT/koffi"
+  [ -d "$NPM_KOFFI_DIR" ] || \
+    NPM_KOFFI_DIR="$(find "$NPMROOT" -type d -name koffi -path '*node_modules/koffi' 2>/dev/null | head -1 || true)"
+  if [ -n "$NPM_KOFFI_DIR" ]; then
+    patch_koffi_musl "$NPM_KOFFI_DIR" || true
+  fi
+  PTY_DIR="$(find "$NPMROOT" -type d -name node-pty -path '*node_modules/node-pty' 2>/dev/null | head -1 || true)"
+  if [ -n "$PTY_DIR" ] && [ -f "$PTY_DIR/scripts/prebuild.js" ]; then
+    (cd "$PTY_DIR" && node scripts/prebuild.js >/dev/null 2>&1) \
+      || log "    [警告] node-pty 预编译落位失败（终端功能可能不可用）"
+  fi
+  SUB_DIR="$(find "$NPMROOT" -type d -name dsh-subprocess-local 2>/dev/null | head -1 || true)"
+  if [ -n "$SUB_DIR" ] && [ -f "$SUB_DIR/scripts/ensure-spawn-helper.mjs" ]; then
+    node "$SUB_DIR/scripts/ensure-spawn-helper.mjs" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+# 兜底中的兜底：koffi 源码编译（预编译在真机完全不可用时才触发）。koffi 的
+# npm tarball 自带 src/ 与 cnoke.cjs，cnoke 直接驱动 CMake（无需 node-gyp）。
+# 编译产物落到全部加载搜索路径：平台包 linux_$ARCH/musl_$ARCH 槽位（loadStatic）
+# 与 build/koffi/<triplet>/（loadDynamic 的 existsSync 检查路径）。
+koffi_build_from_source() { # $1=koffi 包目录
+  local KDIR="$1" ARCH BIN PLAT
+  if ! command -v apk >/dev/null 2>&1; then
+    log "    非 Alpine 容器无 apk，无法安装编译工具链"
+    return 1
+  fi
+  log "    安装编译工具链（apk add cmake make gcc g++ python3 linux-headers，下载量大请耐心）..."
+  if ! apk add --no-cache cmake make gcc g++ python3 linux-headers >/dev/null 2>&1; then
+    log "    编译工具链安装失败"
+    return 1
+  fi
+  ARCH="$(node -p process.arch 2>/dev/null || echo arm64)"
+  log "    开始源码编译 koffi（cnoke，需数分钟到数十分钟）..."
+  if ! (cd "$KDIR" && node cnoke.cjs -P . -D src/koffi --release >/dev/null 2>&1); then
+    log "    源码编译失败（cnoke 退出码非零）"
+    return 1
+  fi
+  BIN="$(find "$KDIR/build" "$KDIR/bin" -type f -name koffi.node 2>/dev/null | head -1 || true)"
+  [ -n "$BIN" ] || BIN="$(find "$KDIR" -type f -name koffi.node -newer "$KDIR/package.json" 2>/dev/null | head -1 || true)"
+  if [ -z "$BIN" ]; then
+    log "    编译流程结束但未找到 koffi.node 产物"
+    return 1
+  fi
+  PLAT="$(dirname "$KDIR")/@koromix/koffi-linux-$ARCH"
+  if [ -d "$PLAT" ]; then
+    cp -f "$BIN" "$PLAT/linux_$ARCH/koffi.node" 2>/dev/null || true
+    cp -f "$BIN" "$PLAT/musl_$ARCH/koffi.node" 2>/dev/null || true
+  fi
+  mkdir -p "$KDIR/build/koffi/linux_$ARCH" "$KDIR/build/koffi/musl_$ARCH" 2>/dev/null || true
+  cp -f "$BIN" "$KDIR/build/koffi/linux_$ARCH/koffi.node" 2>/dev/null || true
+  cp -f "$BIN" "$KDIR/build/koffi/musl_$ARCH/koffi.node" 2>/dev/null || true
+  log "    源码编译完成，产物已落到全部加载搜索路径"
+  return 0
+}
+
 if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS --node-linker=hoisted --registry="$DSH_NPM_REGISTRY" "$DSH_SPEC"; then
   log "  pnpm 安装 dsh 完成"
-  # koffi 预编译加载验证（与 cnoke checkPrebuild 同法 require 包目录）：
-  # koffi 是 dsh 运行时 FFI 依赖，平台包内含 glibc/musl 双二进制，musl 变体
-  # 仅需 libstdc++（apk 已补）。失败时把真实错误打进日志（cnoke 会吞掉它）
   KOFFI_DIR="$(find "$PNPM_HOME/global" -type d -name koffi -path '*node_modules/koffi' 2>/dev/null | head -1 || true)"
   if [ -n "$KOFFI_DIR" ]; then
-    if node -e "require(process.argv[1])" "$KOFFI_DIR" >/dev/null 2>&1; then
+    patch_koffi_musl "$KOFFI_DIR" || true
+    if verify_koffi "$KOFFI_DIR"; then
       log "  koffi 预编译加载验证通过"
+      KOFFI_LADDER_OK=1
     else
       log "  [警告] koffi 预编译加载失败，真实错误："
-      node -e "require(process.argv[1])" "$KOFFI_DIR" 2>&1 | head -6 | sed 's/^/[dshm-bootstrap]     /' || true
-      log "  回退 npm 安装（保底路径）..."
-      rm -f "$PNPM_HOME/bin/dsh" "$PNPM_HOME/dsh" 2>/dev/null || true
+      koffi_print_err
+      # 暂存 pnpm 的 dsh shim：npm 回退失败且 pnpm 安装本就完整时还原，
+      # 避免 PATH 里 $PNPM_HOME/bin 优先而 dsh 反而消失
+      SHIM="$PNPM_HOME/bin/dsh"
+      SHIM_BAK=""
+      if [ -e "$SHIM" ]; then
+        mv "$SHIM" "$SHIM.bak.$$" 2>/dev/null && SHIM_BAK="$SHIM.bak.$$"
+      fi
       hash -r
-      npm install -g --no-audit --no-fund --loglevel=notice "$DSH_SPEC"
+      log "  回退 npm 安装（保底路径：--ignore-scripts + 手动补丁，绕开 cnoke 校验段错误）..."
+      npm_fallback || log "  npm 回退安装失败（转试源码编译兜底）"
+      if [ -n "$NPM_KOFFI_DIR" ] && verify_koffi "$NPM_KOFFI_DIR"; then
+        log "  npm 回退后 koffi 加载验证通过"
+        KOFFI_LADDER_OK=1
+      elif [ -n "$NPM_KOFFI_DIR" ] && koffi_build_from_source "$NPM_KOFFI_DIR" && verify_koffi "$NPM_KOFFI_DIR"; then
+        log "  源码编译兜底后 koffi 加载验证通过（npm 布局）"
+        KOFFI_LADDER_OK=1
+      elif [ -z "$NPM_KOFFI_DIR" ] && [ -n "$KOFFI_DIR" ] && koffi_build_from_source "$KOFFI_DIR" && verify_koffi "$KOFFI_DIR"; then
+        log "  源码编译兜底后 koffi 加载验证通过（pnpm 布局）"
+        KOFFI_LADDER_OK=1
+      fi
+      hash -r
+      if [ -n "$SHIM_BAK" ] && ! command -v dsh >/dev/null 2>&1; then
+        mv "$SHIM_BAK" "$SHIM" 2>/dev/null || true
+        hash -r
+      fi
+      if [ -z "$KOFFI_LADDER_OK" ]; then
+        fail "koffi 原生模块不可用（槽位补丁 / npm 回退 / 源码编译全部失败，真实错误见上方日志）"
+      fi
     fi
+  else
+    log "  [警告] 未找到 koffi 包目录，跳过加载验证（dsh 启动时将自行验证）"
   fi
 else
   log "  pnpm 安装失败，回退 npm 安装（保底路径）..."
@@ -235,7 +392,16 @@ else
   # 优先级高于 /usr/local/bin 时 shadow 掉 npm 装的可用 dsh
   rm -f "$PNPM_HOME/bin/dsh" "$PNPM_HOME/dsh" 2>/dev/null || true
   hash -r
-  npm install -g --no-audit --no-fund --loglevel=notice "$DSH_SPEC"
+  npm_fallback || fail "npm 回退安装失败（pnpm / npm 双路径均不可用）"
+  if [ -n "$NPM_KOFFI_DIR" ] && ! verify_koffi "$NPM_KOFFI_DIR"; then
+    log "  [警告] npm 回退后 koffi 加载失败，真实错误："
+    koffi_print_err
+    if koffi_build_from_source "$NPM_KOFFI_DIR" && verify_koffi "$NPM_KOFFI_DIR"; then
+      log "  源码编译兜底后 koffi 加载验证通过"
+    else
+      log "  [警告] 源码编译兜底未通过（dsh 可启动但 FFI 功能可能异常）"
+    fi
+  fi
 fi
 hash -r
 
@@ -245,7 +411,11 @@ log "  dsh 位于: $DSH_BIN"
 # pnpm 装的 dsh 在 $PNPM_HOME；统一符号链接到 /usr/local/bin 供引擎 PATH 使用
 DSH_REAL="$(readlink -f "$DSH_BIN")"
 ln -sf "$DSH_REAL" /usr/local/bin/dsh
-dsh --version || true
+# 硬校验：dsh 无法自检（如 koffi 仍不可用）时安装标记绝不能写入，
+# 否则 App 误判"已就绪"，用户只会得到一个启动即崩的假环境
+if ! $TIMEOUT dsh --version; then
+  fail "dsh --version 自检失败（安装不完整，请查看上方 dsh 输出的真实错误）"
+fi
 
 # ---- 3.5 V8 编译缓存预热（dsh 启动提速） ----
 # Node 22+ 支持 NODE_COMPILE_CACHE：首跑把解析产物落盘，之后每次启动免重复解析。
