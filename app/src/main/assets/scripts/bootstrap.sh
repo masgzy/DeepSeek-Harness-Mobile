@@ -135,6 +135,17 @@ fi
 
 # ---- 2. 安装 pnpm（pnpm 12 为 Rust 重写的原生二进制，安装/运行均显著快于 npm） ----
 npm config set registry "$DSH_NPM_REGISTRY" --global
+# pnpm 12 不透传 npm_config_registry 环境变量（真机实测走了 npmjs.org，
+# 龟速导致 koffi 平台预编译包下载失败被静默跳过 → cnoke 回退源码编译 →
+# 无 CMake 安装中止）。沙箱实测 pnpm 12.15.0 只认用户级 ~/.npmrc 与
+# --registry 旗标：npmrc 覆盖 pnpm 全部子命令，旗标保证本次调用确定生效。
+NPMRC="${HOME:-/root}/.npmrc"
+touch "$NPMRC"
+if grep -q '^registry=' "$NPMRC" 2>/dev/null; then
+  sed -i "s#^registry=.*#registry=$DSH_NPM_REGISTRY#" "$NPMRC"
+else
+  printf 'registry=%s\n' "$DSH_NPM_REGISTRY" >> "$NPMRC"
+fi
 
 install_pnpm_npm() {
   # npmmirror 平台二进制包齐全（@pnpm/exe.linux-arm64[-musl] 已实测同步）；
@@ -197,10 +208,14 @@ if pnpm add --help 2>/dev/null | grep -q -- "--allow-build"; then
   ALLOW_FLAGS="--allow-build=koffi --allow-build=node-pty --allow-build=@deepseek-ai/dsh --allow-build=@deepseek-ai/dsh-subprocess-local"
 fi
 DSH_SPEC="@deepseek-ai/dsh${DSH_VERSION:+@$DSH_VERSION}"
-if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS "$DSH_SPEC"; then
+if npm_config_registry="$DSH_NPM_REGISTRY" pnpm add -g $ALLOW_FLAGS --registry="$DSH_NPM_REGISTRY" "$DSH_SPEC"; then
   log "  pnpm 安装 dsh 完成"
 else
   log "  pnpm 安装失败，回退 npm 安装（保底路径）..."
+  # 清掉可能残留的 pnpm 半成品 dsh shim，避免 PATH 中 $PNPM_HOME/bin
+  # 优先级高于 /usr/local/bin 时 shadow 掉 npm 装的可用 dsh
+  rm -f "$PNPM_HOME/bin/dsh" "$PNPM_HOME/dsh" 2>/dev/null || true
+  hash -r
   npm install -g --no-audit --no-fund --loglevel=notice "$DSH_SPEC"
 fi
 hash -r
