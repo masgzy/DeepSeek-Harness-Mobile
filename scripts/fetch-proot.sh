@@ -23,7 +23,9 @@
 #
 # 用法：
 #   ./scripts/fetch-proot.sh
-#   PROOT_VER=5.1.107.100 TALLOC_VER=2.5.0 SHMEM_VER=0.7 ./scripts/fetch-proot.sh
+#   PROOT_VER_FORCE=5.1.107.101 TALLOC_VER_FORCE=2.5.0 SHMEM_VER_FORCE=0.7 ./scripts/fetch-proot.sh
+# （不设 *_FORCE 时自动从 Termux 索引解析当前版本；TALLOC_VER/SHMEM_VER 仅作
+#   索引解析失败后的内置回退值）
 # =====================================================================
 set -euo pipefail
 
@@ -32,7 +34,7 @@ DEST="$ROOT/app/src/main/jniLibs/arm64-v8a"
 BASE="${TERMUX_POOL_BASE:-https://packages.termux.dev/apt/termux-main/pool/main}"
 ABI="aarch64"
 
-PROOT_VER="${PROOT_VER:-5.1.107.100}"
+PROOT_VER="${PROOT_VER:-5.1.107.101}"
 TALLOC_VER="${TALLOC_VER:-2.5.0}"
 SHMEM_VER="${SHMEM_VER:-0.7}"
 
@@ -63,10 +65,72 @@ fetch_deb() {
   fail "下载失败（已尝试 ${#SOURCES[@]} 个源）: $relpath"
 }
 
+# ---- 动态解析 deb 路径（Termux 池会清除旧版本 deb，硬编码版本号随时 404） ----
+# 从 apt 索引 dists/stable/main/binary-aarch64/Packages 解析三个包的当前
+# pool 相对路径；全部源失败时回退内置已知版本（仍可用 *_VER 环境变量覆盖）。
+resolve_paths() {
+  local src idx
+  for src in "${SOURCES[@]}"; do
+    idx="${src%/pool/main}/dists/stable/main/binary-aarch64/Packages"
+    log "解析包索引: $idx"
+    if ! curl -sfL --retry 2 --connect-timeout 20 --max-time 120 -o "$WORK/Packages" "$idx"; then
+      log "索引不可用，尝试下一个源"
+      continue
+    fi
+    mapfile -t rels < <(python3 - "$WORK/Packages" <<'PYEOF'
+import sys
+
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+want = ["proot", "libtalloc", "libandroid-shmem"]
+found = {}
+for blk in text.split("\n\n"):
+    pkg = fn = None
+    for line in blk.splitlines():
+        if line.startswith("Package: "):
+            pkg = line[9:].strip()
+        elif line.startswith("Filename: "):
+            fn = line[10:].strip()
+    if pkg in want and pkg not in found:
+        found[pkg] = fn
+for k in want:
+    rel = found.get(k, "")
+    # 索引的 Filename 相对仓库根（含 pool/main/ 前缀），而下载源已含 pool/main
+    if rel.startswith("pool/main/"):
+        rel = rel[len("pool/main/"):]
+    print(rel)
+PYEOF
+)
+    if [ -n "${rels[0]:-}" ] && [ -n "${rels[1]:-}" ] && [ -n "${rels[2]:-}" ]; then
+      PROOT_REL="${rels[0]}"
+      TALLOC_REL="${rels[1]}"
+      SHMEM_REL="${rels[2]}"
+      return 0
+    fi
+    log "索引中缺少目标包，尝试下一个源"
+  done
+  return 1
+}
+
+PROOT_REL=""
+TALLOC_REL=""
+SHMEM_REL=""
+if resolve_paths; then
+  log "已解析到当前版本: $PROOT_REL | $TALLOC_REL | $SHMEM_REL"
+else
+  log "动态解析失败，回退内置版本: proot=$PROOT_VER talloc=$TALLOC_VER shmem=$SHMEM_VER"
+  PROOT_REL="p/proot/proot_${PROOT_VER}_${ABI}.deb"
+  TALLOC_REL="libt/libtalloc/libtalloc_${TALLOC_VER}_${ABI}.deb"
+  SHMEM_REL="liba/libandroid-shmem/libandroid-shmem_${SHMEM_VER}_${ABI}.deb"
+fi
+# 显式环境变量仍可强制指定版本（如锁版本复现）
+if [ -n "${PROOT_VER_FORCE:-}" ]; then PROOT_REL="p/proot/proot_${PROOT_VER_FORCE}_${ABI}.deb"; fi
+if [ -n "${TALLOC_VER_FORCE:-}" ]; then TALLOC_REL="libt/libtalloc/libtalloc_${TALLOC_VER_FORCE}_${ABI}.deb"; fi
+if [ -n "${SHMEM_VER_FORCE:-}" ]; then SHMEM_REL="liba/libandroid-shmem/libandroid-shmem_${SHMEM_VER_FORCE}_${ABI}.deb"; fi
+
 # ---- 下载三个 deb 包 ----
-fetch_deb proot "p/proot/proot_${PROOT_VER}_${ABI}.deb"
-fetch_deb talloc "libt/libtalloc/libtalloc_${TALLOC_VER}_${ABI}.deb"
-fetch_deb shmem "liba/libandroid-shmem/libandroid-shmem_${SHMEM_VER}_${ABI}.deb"
+fetch_deb proot "$PROOT_REL"
+fetch_deb talloc "$TALLOC_REL"
+fetch_deb shmem "$SHMEM_REL"
 
 # ---- 解包（dpkg-deb 优先，回退 ar + tar，兼容 data.tar.xz / data.tar.zst） ----
 log "解包 deb ..."
