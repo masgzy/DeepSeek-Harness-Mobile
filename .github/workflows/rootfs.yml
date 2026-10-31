@@ -23,7 +23,7 @@ jobs:
     env:
       DSH_VERSION: ${{ inputs.dsh_version || '0.2.1-rc.2' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: 安装打包依赖
         run: |
@@ -43,7 +43,7 @@ jobs:
           echo "bundle=$(ls dsh-runtime-*.tar.xz)" >> "$GITHUB_OUTPUT"
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dsh-runtime-arm64
           path: |
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dsh-runtime-arm64
           path: dist
