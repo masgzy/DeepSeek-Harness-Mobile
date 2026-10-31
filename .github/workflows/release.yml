@@ -25,10 +25,10 @@ jobs:
       version_name: ${{ steps.tag.outputs.version_name }}
       ephemeral: ${{ steps.keystore.outputs.ephemeral }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -40,7 +40,7 @@ jobs:
           accept-android-sdk-licenses: 'true'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: 解析版本号
         id: tag
@@ -116,7 +116,7 @@ jobs:
           ls -la dist/
 
       - name: 上传 APK 产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk-release
           path: dist/*.apk
@@ -125,7 +125,7 @@ jobs:
     name: 构建预装运行时
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: 安装打包依赖
         run: |
           sudo apt-get update -y
@@ -138,7 +138,7 @@ jobs:
         run: |
           cd runtime/out && sha256sum * > SHA256SUMS.txt
       - name: 上传运行时产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-bundle
           path: |
@@ -151,65 +151,26 @@ jobs:
     needs: [apk, runtime]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      # fetch-depth: 0 —— 更新日志需要完整提交历史与全部 tag
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: 下载全部产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
 
+      # 生成校验和 + 内嵌完整更新日志的 Release Notes（脚本与本地补写历史 release 共用）
       - name: 生成校验和与 Release Notes
         env:
           TAG: ${{ needs.apk.outputs.tag }}
           EPHEMERAL: ${{ needs.apk.outputs.ephemeral }}
-        run: |
-          cd dist
-          sha256sum *.apk *.tar.xz manifest.json > SHA256SUMS.txt 2>/dev/null || \
-            sha256sum * > SHA256SUMS.txt
-          cat > "$GITHUB_WORKSPACE/release_notes.md" <<'HEADER'
-          > DeepSeek Harness Mobile —— 免 root 在 Android 上运行 DeepSeek Harness 的原生容器方案。
-
-          HEADER
-          cat >> "$GITHUB_WORKSPACE/release_notes.md" <<NOTES
-          ## 📦 下载
-
-          | 文件 | 说明 |
-          | --- | --- |
-          | \`DeepSeek-Harness-Mobile-$TAG-arm64-v8a.apk\` | 应用主程序（arm64-v8a，Android 8.0+） |
-          | \`dsh-runtime-ubuntu26.04-arm64-*.tar.xz\` | 预装运行时镜像（App 内「预装运行时」通道自动下载） |
-          | \`manifest.json\` | 预装运行时清单（版本 / SHA-256 / 字节数） |
-
-          ## ✅ SHA-256 校验
-
-          \`\`\`
-          $(cat dist/SHA256SUMS.txt)
-          \`\`\`
-
-          ## 🚀 安装说明
-
-          1. 下载 APK 安装（需允许「安装未知应用」）；
-          2. 首次启动按向导安装：推荐「官方 rootfs + 在线安装」（约 30MB 下载），
-             或选择「预装运行时」直接下载本页 bundle（约 200MB，无需容器内联网安装）；
-          3. 启动引擎后在 App 内使用 dsh 官方 Web UI，API Key 在 Web UI 设置中填写。
-
-          ## ⚠️ 注意事项
-
-          - 本项目为社区驱动，与 DeepSeek 官方无关；dsh 处于 developer preview，接口可能变动。
-          - $([ "$EPHEMERAL" = "true" ] && echo "**本预发布 APK 使用一次性签名密钥构建，无法覆盖安装后续版本；正式密钥配置后将保持稳定。**" || echo "APK 使用仓库配置的正式签名密钥，可覆盖安装升级。")
-
-          ## 🔗 变更明细
-
-          见 [CHANGELOG.md](https://github.com/masgzy/DeepSeek-Harness-Mobile/blob/main/CHANGELOG.md)。
-
-          **Full Changelog**: https://github.com/masgzy/DeepSeek-Harness-Mobile/commits/$TAG
-          NOTES
-          # 清理行首缩进（heredoc 带缩进写入时统一去掉 10 空格前缀）
-          sed -i 's/^          //' "$GITHUB_WORKSPACE/release_notes.md" || true
-          cat "$GITHUB_WORKSPACE/release_notes.md"
+        run: ./scripts/gen-release-notes.sh
 
       - name: 发布 GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.apk.outputs.tag }}
           name: DeepSeek Harness Mobile ${{ needs.apk.outputs.tag }}

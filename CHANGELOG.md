@@ -8,8 +8,27 @@
 
 ## [Unreleased]
 
+（暂无；已合入 main 的变更随下一个 tag 发布时记录于此。）
+
+### 计划中
+
+- SAF 文件桥：免权限导入导出设备文件
+- Digest 锁定的运行时增量更新与自动回滚
+- API Key Android Keystore 加密存储
+- 可选 Shizuku 集成（设备 shell 能力扩展）
+
+## [1.0.0-alpha.6] - 2026-10-31
+
+自 alpha.5 以来共 16 个提交：pnpm 安装链路打通与加固、轻量容器终端、
+引擎运行时可靠性（凭据自愈 / 失败收场）与多项体验修复。可从 alpha.5 覆盖安装。
+
 ### 新增
 
+- **dsh 改 pnpm 优先安装**：容器内引导支持 npm / pnpm / 离线包三种安装方式
+  （pnpm 优先，大陆网络下更稳）；Alpine 补 libstdc++ 根治 koffi 段错误；
+  安装完成后自动镜像测速 + 预启动引擎，装完即达「对话已就绪」；
+- **应用内模型配置与插件管理**（对齐 dphmoblie 能力）：模型参数与插件
+  安装/启停可在 App 内管理；
 - **容器系统可选**：环境屏「容器系统」卡 + 设置页「版本管理」支持切换
   五个内置发行版 —— Debian 13 (trixie) / Debian 12 (bookworm) / Ubuntu 26.04（默认，
   cdimage 直链优先）/ Ubuntu 24.04 (noble) / Alpine 3.22 (musl)；
@@ -30,14 +49,56 @@
 - **Alpine (musl) 容器支持**：bootstrap 改为 POSIX sh 兼容；Alpine 路径在
   容器内切 apk 镜像源后 `apk add bash nodejs npm`（官方 Node glibc tarball
   不兼容 musl），随后以 bash 重入统一安装流程；npm 源选国内时顺带 best-effort
-  切换容器内 apt 源（Debian/Ubuntu）。
+  切换容器内 apt 源（Debian/Ubuntu）；
+- **轻量容器终端**：应用内直接进入容器 shell，支持 Termux 风格 extra-keys
+  快捷键条（CTRL/ALT/FN 点按粘滞、长按锁定、按住即生效），终端整屏纯黑、
+  输出实时刷新、点击空白处唤起输入法、快捷键条随软键盘上浮；
+- **直链优先安装 + 并行下载 + 镜像测速**：rootfs 下载优先直链源、多镜像
+  测速择优、并行分块，下载进度与失败原因详报；
+- **引擎凭据自愈**：web 凭据失效或引擎无响应时自动重启引擎换取新 token
+  （根治「正在获取访问凭据」无限死等）；启动 60s 无凭据自动重启引擎再等 45s；
+  等待弹窗 8s 轮询无果自动恢复；
+- **状态诚实化**：首页仅在 web 凭据就绪时显示「对话已就绪」，运行中无凭据
+  显示「引擎运行中·等待凭据」，未运行显示「对话未运行」，不再虚报状态；
+- **发版流水线**：Release Notes 内嵌提交级完整更新日志（上一版本 → 本版本
+  全部提交）与非空 SHA-256 校验块；GitHub Actions 全线升级 Node 24 运行时
+  （checkout@v7 / setup-java@v6 / setup-gradle@v6 / upload-artifact@v7 /
+  download-artifact@v8 / action-gh-release@v3），消除 Node 20 deprecation 告警。
 
-### 计划中
+### 修复
 
-- SAF 文件桥：免权限导入导出设备文件
-- Digest 锁定的运行时增量更新与自动回滚
-- API Key Android Keystore 加密存储
-- 可选 Shizuku 集成（设备 shell 能力扩展）
+- **koffi musl 槽位补丁**：安装 koffi 时按容器 libc（musl/glibc）改写预编译
+  binding 槽位，根治真机 Segmentation fault，并做三层回退加固（第四轮）；
+- **pnpm 安装链路**：pnpm 12 registry 不生效改走 `~/.npmrc` + `--registry`
+  旗标（根治 koffi 预编译产物拉取失败）；`pnpm add -g` 前预置
+  `$PNPM_HOME/bin` 入 PATH（修复 ERR_PNPM_GLOBAL_BIN_DIR_NOT_IN_PATH）；
+  dsh 改 hoisted 平铺布局 + koffi 加载验证由 bootstrap 执行（第三轮真机根因）；
+  沙箱 v12/v11 双链路全流程实测修复两处缺陷；
+- **引擎启动即退按失败收场**：dsh-watch 记录进程退出码与存活时长，启动 90s
+  内退出即转存 engine.log 尾部 12 行并在门屏明确报错，不再无限等待；
+- **终端输出实时刷新**：终端会话与引擎会话共享 client，命令输出即时上屏
+  （此前命令已执行但需退出重开终端才能看到输出）；
+- **停止引擎 ANR 修复**与旧 token 验证修复；
+- **直链包误回退与 bin/sh 缺失两大根因**修复；
+- **fetch-proot 增加 TUNA 镜像回退**：termux 官方池异常导致 CI 注入资产
+  步骤失败的兜底；
+- **DockerRegistryClient 4 处编译错误**修复。
+
+## [1.0.0-alpha.5] - 2026-10-24
+
+启动图标更换与 UI 基础组件库对齐参考项目。可从 alpha.4 覆盖安装。
+
+### 变更
+
+- **启动图标改为用户指定女仆立绘**：自适应图标前景/背景、圆形与传统图标
+  等整套 mipmap 资产更新；
+- **UI 组件库逐项复刻 dphmoblie styles.css**：按钮 / 卡片 / 输入框等基础
+  组件形态与参考项目保持一致。
+
+### 修复
+
+- **CI 触发器截断**：push 触发 branches 配置损坏（`ain]`）导致推 main
+  不再触发 CI，已恢复 `[ main ]`。
 
 ## [1.0.0-alpha.4] - 2026-10-24
 
@@ -162,7 +223,7 @@ dphmoblie/deepseek-harness-android。可从 alpha.2 覆盖安装。
 - 容器绑定补充 `/apex` 与 `/linkerconfig/ld.config.txt`（Android 10+
   系统组件路径，termux-chroot 同款）。
 
-## [1.0.0-alpha.1] - 2026-10-24
+## [1.0.0-alpha.1] - 2026-10-23
 
 首个开发者预览版本（项目框架落地）。
 
@@ -206,5 +267,10 @@ dphmoblie/deepseek-harness-android。可从 alpha.2 覆盖安装。
   ELF，升级需先设计 exec 迁移方案）；
 - alpha 阶段未配置正式签名密钥时，Release APK 使用一次性密钥（无法覆盖升级）。
 
-[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.1...HEAD
+[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.6...HEAD
+[1.0.0-alpha.6]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.5...v1.0.0-alpha.6
+[1.0.0-alpha.5]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.4...v1.0.0-alpha.5
+[1.0.0-alpha.4]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.3...v1.0.0-alpha.4
+[1.0.0-alpha.3]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.2...v1.0.0-alpha.3
+[1.0.0-alpha.2]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.1...v1.0.0-alpha.2
 [1.0.0-alpha.1]: https://github.com/masgzy/DeepSeek-Harness-Mobile/releases/tag/v1.0.0-alpha.1

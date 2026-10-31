@@ -15,18 +15,19 @@ jobs:
     name: Shell 脚本检查
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: shellcheck
         run: |
           shellcheck -S error \
             scripts/fetch-proot.sh \
+            scripts/gen-release-notes.sh \
             runtime/build-rootfs.sh \
             app/src/main/assets/scripts/bootstrap.sh \
             app/src/main/assets/scripts/pnpm-install.sh \
             app/src/main/assets/scripts/mirror-apply.sh
       - name: bash 语法检查
         run: |
-          for f in scripts/fetch-proot.sh runtime/build-rootfs.sh \
+          for f in scripts/fetch-proot.sh scripts/gen-release-notes.sh runtime/build-rootfs.sh \
                    app/src/main/assets/scripts/bootstrap.sh \
                    app/src/main/assets/scripts/pnpm-install.sh \
                    app/src/main/assets/scripts/mirror-apply.sh; do
@@ -37,7 +38,7 @@ jobs:
     name: Android 构建（arm64-v8a）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # JDK 21 跑 Gradle：AGP 新版 lint 内部分析依赖 JDK 21 的
       # SequencedCollection.removeLast()（JDK 17 下 lintDebug 硬崩，
