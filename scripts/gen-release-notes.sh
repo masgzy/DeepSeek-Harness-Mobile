@@ -31,7 +31,8 @@ else
   (
     cd "$DIST"
     # 首选显式清单（顺序稳定）；缺任一类产物时回退为目录全量（排除校验和文件自身）
-    # shellcheck disable=SC2035 —— glob 展开在前，哈希文件名不含 ./ 前缀更美观
+    # 哈希文件名不带 ./ 前缀，下载表格与校验块展示更美观
+    # shellcheck disable=SC2035
     if sha256sum *.apk *.tar.xz manifest.json > .SHA256SUMS.tmp 2>/dev/null; then
       :
     else
