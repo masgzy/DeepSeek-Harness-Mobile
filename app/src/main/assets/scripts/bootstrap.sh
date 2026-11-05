@@ -21,6 +21,8 @@
 #                             SHA-256；Alpine 路径不注入该文件）
 #   /dshm/bootstrap.sh     -> 本脚本
 #   /dshm/pnpm-install.sh  -> pnpm 一键脚本（安装方式 = script 时使用）
+#   /dshm/boot-cache.mjs   -> 引擎启动加速预载模块（bootstrap 拷贝到容器内
+#                             /root/.dshm/boot-cache.mjs 持久生效）
 #
 # 环境变量（由宿主注入）：
 #   DSH_VERSION      要安装的 @deepseek-ai/dsh 版本（空 = npm latest）
@@ -417,14 +419,27 @@ if ! $TIMEOUT dsh --version; then
   fail "dsh --version 自检失败（安装不完整，请查看上方 dsh 输出的真实错误）"
 fi
 
-# ---- 3.5 V8 编译缓存预热（dsh 启动提速） ----
+# ---- 3.6 boot-cache 预载模块落位（proot 启动加速，设计移植自 dsh-Go） ----
+# /dshm 绑定仅在安装时存在，预载模块必须拷进容器内持久路径（/root/.dshm/），
+# 引擎进程按 NODE_OPTIONS=--import 启用（宿主侧检查文件存在才注入，老安装自动退回）
+if [ -f /dshm/boot-cache.mjs ]; then
+  mkdir -p "$MARKER_DIR"
+  cp -f /dshm/boot-cache.mjs "$MARKER_DIR/boot-cache.mjs" 2>/dev/null \
+    && log "  boot-cache 预载模块已落位: $MARKER_DIR/boot-cache.mjs" \
+    || log "  [警告] boot-cache 落位失败（不影响安装，启动走原路径）"
+fi
+
+# ---- 4/5 V8 编译缓存预热（dsh 启动提速） ----
 # Node 22+ 支持 NODE_COMPILE_CACHE：首跑把解析产物落盘，之后每次启动免重复解析。
 # proot 下 stat/open 翻译开销大，dsh web 冷启动 10-30s；预热后引擎启动明显加快。
 # 引擎进程（EngineManager）启动时已注入同名环境变量，缓存目录保持一致。
+# 预载 boot-cache 一并生效：预热这一跑同时填热 V8 缓存并验证 --import 不抛错。
 log "[4/5] 预热 Node 编译缓存（加速 dsh 启动）..."
 COMPILE_CACHE="$MARKER_DIR/compile-cache"
 mkdir -p "$COMPILE_CACHE"
-NODE_COMPILE_CACHE="$COMPILE_CACHE" dsh --version >/dev/null 2>&1 \
+BOOTCACHE_OPTS=""
+[ -f "$MARKER_DIR/boot-cache.mjs" ] && BOOTCACHE_OPTS="--import=file://$MARKER_DIR/boot-cache.mjs"
+NODE_COMPILE_CACHE="$COMPILE_CACHE" NODE_OPTIONS="$BOOTCACHE_OPTS" dsh --version >/dev/null 2>&1 \
   || log "  预热跳过（不影响功能）"
 
 # ---- 5. 写入就绪标记 ----

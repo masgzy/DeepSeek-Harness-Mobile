@@ -162,7 +162,17 @@ class EngineManager(private val context: Context) {
     val envPairs = listOf(
       "DSH_HOME=/root/.dsh",
       "DSH_PICK_DISABLE_UPDATE_CHECK=1",
-      "NODE_OPTIONS=--max-old-space-size=512",
+      // boot-cache 预载（设计移植自 dsh-Go）：proot 下 stat/读文件逐次陷入
+      // ptrace，对安装后只读的 dsh/Node 目录树做进程内缓存，热路径（启动解析
+      // 模块树）提速；stdout 出现 ?token= 或 120s 后自动撤除，不影响运行期
+      // I/O。文件由 bootstrap 落位到容器 /root/.dshm/；宿主侧检查存在才注入，
+      // 老安装/缺失时自动走原路径（NODE_OPTIONS 引用不存在的模块会让 node 拒启）。
+      "NODE_OPTIONS=" + buildString {
+        append("--max-old-space-size=512")
+        if (java.io.File(rootfsDir, "root/.dshm/boot-cache.mjs").isFile) {
+          append(" --import=file:///root/.dshm/boot-cache.mjs")
+        }
+      },
       // Node 22+ V8 编译缓存：二次启动免重复解析 dsh 依赖树（proot 下 stat/open
       // 翻译开销大，冷启动 10-30s；缓存命中后明显提速）。bootstrap 已预热首份缓存。
       "NODE_COMPILE_CACHE=/root/.dshm/compile-cache",

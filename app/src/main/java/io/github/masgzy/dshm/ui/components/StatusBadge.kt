@@ -39,6 +39,8 @@ object Phases {
   val DOWNLOADING = PhaseStyle("下载中", StatusTone.BLUE)
   val VERIFYING = PhaseStyle("正在校验", StatusTone.AMBER)
   val EXTRACTING = PhaseStyle("正在安装", StatusTone.AMBER)
+  /** 环境已安装但引擎未运行：中性静态（呼吸绿点 + 「已就绪」是运行中语义，空闲态不得使用）。 */
+  val STANDBY = PhaseStyle("环境就绪", StatusTone.NEUTRAL)
   val READY = PhaseStyle("已就绪", StatusTone.GREEN)
   val RUNNING = PhaseStyle("运行中", StatusTone.GREEN)
   val STOPPING = PhaseStyle("正在停止", StatusTone.AMBER)

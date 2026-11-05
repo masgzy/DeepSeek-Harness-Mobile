@@ -117,6 +117,31 @@ kotlin {
   }
 }
 
+// ---------------------------------------------------------------------------
+// proot 运行四件套自动注入（治「本地打出的 APK 不带 proot」）
+//
+// app/src/main/jniLibs/ 是 gitignore 的构建期产物，此前只有 CI 工作流显式跑
+// scripts/fetch-proot.sh，本地 assembleDebug 极易忘记注入，产出的 APK 缺
+// libdsh_proot.so 导致容器必然起不来（且只有装到真机才会发现）。改为
+// Gradle 接管：任何 pre*Build 前检查标记文件，缺失即自动执行注入脚本
+// （脚本自带 Termux 索引解析 + TUNA 镜像回退，幂等可重复执行）。
+// 跳过手段：PROOT_SKIP_FETCH=1 ./gradlew ...（如仅想快速验证编译）。
+// ---------------------------------------------------------------------------
+val prootMarker = file("src/main/jniLibs/arm64-v8a/libdsh_proot.so")
+val fetchProot by tasks.registering(Exec::class) {
+  group = "build setup"
+  description = "缺失时执行 scripts/fetch-proot.sh 注入 proot 运行四件套到 jniLibs"
+  workingDir = rootDir
+  commandLine("bash", "scripts/fetch-proot.sh")
+  // 输出即标记文件；配合 onlyIf 实现存在即跳过（PROOT_SKIP_FETCH=1 强制跳过）
+  outputs.file(prootMarker)
+  onlyIf {
+    !prootMarker.exists() && System.getenv("PROOT_SKIP_FETCH") != "1"
+  }
+}
+tasks.matching { it.name == "preBuild" || it.name.matches(Regex("pre[A-Za-z]+Build")) }
+  .configureEach { dependsOn(fetchProot) }
+
 dependencies {
   val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
   implementation(composeBom)

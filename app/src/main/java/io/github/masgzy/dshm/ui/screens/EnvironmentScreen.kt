@@ -191,7 +191,8 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             setup.running -> phaseForStep(setup.step)
             setup.error != null -> Phases.ERROR
             running -> Phases.RUNNING
-            installed -> Phases.READY
+            // 已安装但未运行：中性「环境就绪」（绿色呼吸「已就绪」是运行中语义）
+            installed -> Phases.STANDBY
             else -> Phases.NOT_INSTALLED
           },
         )

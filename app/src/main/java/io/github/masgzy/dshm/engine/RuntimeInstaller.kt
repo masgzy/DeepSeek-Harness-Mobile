@@ -74,6 +74,7 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     // 2) 注入 bootstrap 脚本 + pnpm 一键脚本（安装方式 = script 时在容器内执行）
+    //    + boot-cache 预载模块（proot 启动加速，bootstrap 落位到 /root/.dshm/）
     val scriptDir = File(filesDir, "dshm")
     scriptDir.mkdirs()
     val script = File(scriptDir, "bootstrap.sh")
@@ -86,6 +87,10 @@ class RuntimeInstaller(private val context: Context) {
       pnpmScript.outputStream().use { out -> input.copyTo(out) }
     }
     pnpmScript.setExecutable(true, true)
+    val bootCache = File(scriptDir, "boot-cache.mjs")
+    context.assets.open("scripts/boot-cache.mjs").use { input ->
+      bootCache.outputStream().use { out -> input.copyTo(out) }
+    }
 
     // 3) proot 内执行 bootstrap
     onProgress("容器内安装 Node.js + dsh", 0, 1)
@@ -98,6 +103,7 @@ class RuntimeInstaller(private val context: Context) {
       nodeArchive?.let { add(it.absolutePath + ":/dshm/node.tar.gz") }
       add(script.absolutePath + ":/dshm/bootstrap.sh")
       add(pnpmScript.absolutePath + ":/dshm/pnpm-install.sh")
+      add(bootCache.absolutePath + ":/dshm/boot-cache.mjs")
       add(workspace.absolutePath + ":/root/projects")
     }
     val isCn = npmRegistry == Paths.NPM_REGISTRY_CN

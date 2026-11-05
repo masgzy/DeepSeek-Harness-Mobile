@@ -217,7 +217,10 @@ private fun currentPhase(
   setupRunning -> phaseForStep(setupStep)
   setupError != null -> Phases.ERROR
   engineRunning -> Phases.RUNNING
-  viewModel.rootfsManager.isRootfsReady && viewModel.engineManager.engineReady -> Phases.READY
+  // 已安装但引擎未跑：中性静态「环境就绪」（此前显示绿色呼吸「已就绪」，
+  // 用户反馈关闭应用再进入会误以为服务已在后台运行 —— 绿点呼吸 + 「已就绪」
+  // 是运行中语义，空闲态不得使用）
+  viewModel.rootfsManager.isRootfsReady && viewModel.engineManager.engineReady -> Phases.STANDBY
   else -> Phases.NOT_INSTALLED
 }
 

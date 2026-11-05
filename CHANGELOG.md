@@ -8,10 +8,31 @@
 
 ## [Unreleased]
 
-（暂无；已合入 main 的变更随下一个 tag 发布时记录于此。）
+### 修复
+
+- **首页状态诚实化**：环境已安装但引擎未运行时，顶栏徽章显示中性「环境就绪」
+  （静态灰点），不再显示绿色呼吸「已就绪」；门屏说明改为「打开对话时才会
+  启动本机服务（当前未运行）」——修复关闭应用再进入时误以为服务已在后台
+  运行的问题（首页/环境屏两处）。
+
+### 新增
+
+- **boot-cache 启动加速预载**（设计移植自 dsh-Go）：引擎启动时经
+  `NODE_OPTIONS=--import` 预载 fs 缓存模块，对安装后只读的 dsh/Node 目录树
+  缓存 stat/lstat/exists/readFile（proot 下每次路径查找陷入 ptrace，模块
+  解析期是热路径）；stdout 出现 `?token=` 或 120s 后自动撤除，不影响运行期
+  I/O。文件由 bootstrap 落位到容器 `/root/.dshm/boot-cache.mjs`，老安装
+  自动走原路径。
+- **本地构建自动注入 proot**：`app/build.gradle.kts` 新增 `fetchProot` 任务
+  挂到全部 `pre*Build`——jniLibs 缺失时自动执行 `scripts/fetch-proot.sh`，
+  治「本地打的 debug APK 不带 proot、装上容器起不来」；CI 显式注入步骤
+  不受影响，`PROOT_SKIP_FETCH=1` 可跳过。
+- **竞品设计参考文档** `docs/design-reference.md`：DSHA / dsh-Go 的启动
+  契约、停止语义、boot-cache、补丁注册表拆解与本项目决策对照表。
 
 ### 计划中
 
+- RuntimeTrial：换容器系统/升 dsh 前在隔离目录试启动，验证通过再转正
 - SAF 文件桥：免权限导入导出设备文件
 - Digest 锁定的运行时增量更新与自动回滚
 - API Key Android Keystore 加密存储

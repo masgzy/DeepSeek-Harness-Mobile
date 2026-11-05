@@ -346,5 +346,7 @@ private fun detail(ready: Boolean, running: Boolean, launching: Boolean, stoppin
   stopping -> "停止完成后即可重新打开对话。"
   ready -> "本机服务正在运行，打开后即可继续对话。"
   running -> "引擎进程已在运行；若日志尾部凭据已过期，将自动重启引擎换新 token。"
-  else -> "打开对话时才会启动本机服务；容器与运行环境已就绪。"
+  // 状态诚实化：容器装好 ≠ 服务在跑。用户反馈「关闭应用再进入显示已就绪会误导」，
+  // 明说「服务未运行」，打开时才启动
+  else -> "打开对话时才会启动本机服务（当前未运行）；容器环境已安装就绪。"
 }
