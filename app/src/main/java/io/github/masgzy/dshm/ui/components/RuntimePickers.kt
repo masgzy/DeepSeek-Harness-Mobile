@@ -23,9 +23,9 @@ import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -400,7 +400,7 @@ private fun SelectRow(
           title,
           fontSize = 13.5.sp,
           fontWeight = FontWeight(650),
-          color = if (selected) p.blue else MaterialTheme.colorScheme.onSurface,
+          color = if (selected) p.blue else MiuixTheme.colorScheme.onSurface,
         )
         if (badge != null) {
           Box(

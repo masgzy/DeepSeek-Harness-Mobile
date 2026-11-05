@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -66,8 +66,8 @@ fun phaseForStep(step: String): PhaseStyle = when {
 @Composable
 fun StatusBadge(style: PhaseStyle, modifier: Modifier = Modifier) {
   val p = LocalDshmPalette.current
-  val neutralText = MaterialTheme.colorScheme.onSurfaceVariant
-  val neutralBg = MaterialTheme.colorScheme.surface
+  val neutralText = MiuixTheme.colorScheme.onSurfaceVariantSummary
+  val neutralBg = MiuixTheme.colorScheme.surface
 
   val (text, dot, bg, line) = when (style.tone) {
     StatusTone.NEUTRAL -> Tuple4(neutralText, p.muted, neutralBg, p.line)

@@ -1,9 +1,6 @@
 package io.github.masgzy.dshm.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -11,15 +8,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
- * 外壳配色：整版照搬 dphmoblie/deepseek-harness-android 的 styles.css 令牌
- * （深浅两套固定色值，不使用 Material You 动态取色，保证与参考项目观感一致）。
+ * 外壳主题：全面迁移到 miuix（HyperOS 设计语言，top.yukonga.miuix.kmp）。
  *
- * 浅色 :root        / 深色 :root[data-theme='dark']，逐项对应。
+ *  - miuix `lightColorScheme()/darkColorScheme()` 覆盖品牌色：主色沿用原海洋蓝
+ *    （浅 0xFF315FCF / 深 0xFF86ABFF），表面/背景沿用原 DshmPalette 的底色体系，
+ *    保证迁移前后观感连续；
+ *  - [DshmPalette] 保留：语义扩展色（成功绿/警告琥珀/危险红软底、终端面板深色、
+ *    毛玻璃顶栏、toast）是 miuix 色板之外的领域色，供 UiKit 定制组件与终端区使用；
+ *  - dsh web（HarnessActivity）与终端渲染区不经过本主题（WebView / 纯黑终端例外区）。
  */
 
-/** 语义色全集：M3 colorScheme 装不下的扩展令牌都放这里。 */
+/** 语义色全集：miuix colorScheme 装不下的扩展令牌都放这里。 */
 data class DshmPalette(
   // 表面与文字
   val bg: Color,
@@ -148,6 +152,48 @@ private val DarkPalette = DshmPalette(
 
 val LocalDshmPalette = staticCompositionLocalOf { LightPalette }
 
+/** miuix 浅色方案：品牌蓝 + 原底色体系（其余取 miuix 默认 HyperOS 值）。 */
+private fun dshmLightScheme(p: DshmPalette) = lightColorScheme(
+  primary = p.blue,
+  onPrimary = Color.White,
+  primaryVariant = p.blueHover,
+  onPrimaryVariant = p.blueSoft,
+  background = p.bg,
+  onBackground = p.ink,
+  surface = p.surface,
+  onSurface = p.ink,
+  surfaceVariant = p.surfaceMuted,
+  onSurfaceSecondary = p.ink.copy(alpha = 0.8f),
+  onSurfaceVariantSummary = p.muted,
+  secondary = p.ink,
+  onSecondary = Color.White,
+  error = p.red,
+  onError = Color.White,
+  errorContainer = p.redSoft,
+  onErrorContainer = p.red,
+)
+
+/** miuix 深色方案：同构映射。 */
+private fun dshmDarkScheme(p: DshmPalette) = darkColorScheme(
+  primary = p.blue,
+  onPrimary = Color(0xFF0F1317),
+  primaryVariant = p.blueHover,
+  onPrimaryVariant = p.blueSoft,
+  background = p.bg,
+  onBackground = p.ink,
+  surface = p.surface,
+  onSurface = p.ink,
+  surfaceVariant = p.surfaceMuted,
+  onSurfaceSecondary = p.ink.copy(alpha = 0.8f),
+  onSurfaceVariantSummary = p.muted,
+  secondary = p.ink,
+  onSecondary = Color(0xFF0F1317),
+  error = p.red,
+  onError = Color(0xFF0F1317),
+  errorContainer = p.redSoft,
+  onErrorContainer = p.red,
+)
+
 /**
  * 页面背景绘制：底色上叠两个 accent 蓝径向渐变（对齐参考项目 body 背景）——
  * 左上 `circle at 7% -12%: blue 10% → transparent 34%`，
@@ -182,56 +228,8 @@ object DshmRadius {
   const val inner = 8
 }
 
-private fun lightScheme(p: DshmPalette) = lightColorScheme(
-  primary = p.blue,
-  onPrimary = Color.White,
-  primaryContainer = p.blueSoft,
-  onPrimaryContainer = p.blue,
-  secondary = p.ink,
-  onSecondary = Color.White,
-  background = p.bg,
-  onBackground = p.ink,
-  surface = p.surface,
-  onSurface = p.ink,
-  surfaceVariant = p.surfaceMuted,
-  onSurfaceVariant = p.muted,
-  surfaceContainer = p.surface,
-  surfaceContainerHigh = p.surface,
-  surfaceContainerHighest = p.surface,
-  outline = p.lineStrong,
-  outlineVariant = p.line,
-  error = p.red,
-  onError = Color.White,
-  errorContainer = p.redSoft,
-  onErrorContainer = p.red,
-)
-
-private fun darkScheme(p: DshmPalette) = darkColorScheme(
-  primary = p.blue,
-  onPrimary = Color(0xFF0F1317),
-  primaryContainer = p.blueSoft,
-  onPrimaryContainer = p.blue,
-  secondary = p.ink,
-  onSecondary = Color(0xFF0F1317),
-  background = p.bg,
-  onBackground = p.ink,
-  surface = p.surface,
-  onSurface = p.ink,
-  surfaceVariant = p.surfaceMuted,
-  onSurfaceVariant = p.muted,
-  surfaceContainer = p.surface,
-  surfaceContainerHigh = p.surface,
-  surfaceContainerHighest = p.surface,
-  outline = p.lineStrong,
-  outlineVariant = p.line,
-  error = p.red,
-  onError = Color(0xFF0F1317),
-  errorContainer = p.redSoft,
-  onErrorContainer = p.red,
-)
-
 /**
- * 外壳主题：深浅双色板固定取值，强调色默认海洋蓝。
+ * 外壳主题：MiuixTheme 接线（深浅双色板固定取值，强调色海洋蓝）。
  * 与参考项目一致：状态栏/导航栏融入背景（theme-color == --bg）。
  */
 @Composable
@@ -241,9 +239,15 @@ fun DshmTheme(
 ) {
   val palette = if (darkTheme) DarkPalette else LightPalette
   CompositionLocalProvider(LocalDshmPalette provides palette) {
-    MaterialTheme(
-      colorScheme = if (darkTheme) darkScheme(palette) else lightScheme(palette),
+    MiuixTheme(
+      colors = if (darkTheme) dshmDarkScheme(palette) else dshmLightScheme(palette),
       content = content,
     )
   }
+}
+
+/** 便捷取色：UiKit 定制组件里用 `MiuixTheme.colorScheme.xxx` 直接读。 */
+object DshmMiuix {
+  val colors: top.yukonga.miuix.kmp.theme.Colors
+    @Composable get() = MiuixTheme.colorScheme
 }

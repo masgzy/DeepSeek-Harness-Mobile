@@ -36,10 +36,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -60,19 +56,30 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import io.github.masgzy.dshm.R
 import io.github.masgzy.dshm.ui.theme.DshmRadius
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonColors
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardColors
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 外壳通用组件库：逐项复刻 dphmoblie/deepseek-harness-android 的 styles.css——
- * brand / eyebrow / screen-heading / button 系列 / inline-alert / progress /
- * install-steps / segmented / capsule / detail-row / settings-section /
- * management-row / dialog（底部弹卡）/ field。
- * 数值（圆角三档 12/16/999 + 内层 8、按钮 44 高、字重 650、进度条 8px、
- * 步骤圆 27px、行高 68、弹卡 23 内边距）与 CSS 一致。
+ * 外壳通用组件库（miuix 版）：基于 top.yukonga.miuix.kmp（HyperOS 设计语言）
+ * 重新接线 —— Button / Card / TabRow / TextField / OverlayDialog / Surface / Text
+ * 全部使用 miuix 组件，语义扩展色（成功绿/警告琥珀/危险红/终端深面板）沿用
+ * [LocalDshmPalette]。对外签名与旧版完全一致（调用方无需改动）。
+ *
+ * 数值尺度保留（控件 12 圆角、按钮 44 高、行高 68、弹卡内边距 23），
+ * 质感（按压反馈、滑块分段、弹窗缩放）由 miuix 接管。
  */
 
 private fun controlShape() = RoundedCornerShape(DshmRadius.control.dp)
@@ -169,14 +176,14 @@ fun ScreenHeading(eyebrow: String, title: String, modifier: Modifier = Modifier)
       fontWeight = FontWeight(720),
       lineHeight = 32.sp,
       letterSpacing = (-0.68).sp,
-      color = MaterialTheme.colorScheme.onBackground,
+      color = MiuixTheme.colorScheme.onBackground,
     )
   }
 }
 
 /**
- * 按钮基座（.button：44 高 / 12 圆角 / 14px·650，按下颜色加深，禁用整体 52% 透明）。
- * 参考项目按钮无 M3 阴影体系，这里用扁平底色 + 按压反馈复刻。
+ * 按钮基座：miuix Button（HyperOS 按压反馈/禁用态）+ 品牌配色注入。
+ * 44 高 / 12 圆角 / 14px·650，禁用整体 52% 透明（与旧版观感一致）。
  */
 @Composable
 private fun BaseButton(
@@ -188,32 +195,23 @@ private fun BaseButton(
   container: Color,
   content: Color,
   border: Color? = null,
-  pressedContainer: Color? = null,
 ) {
-  val interaction = remember { MutableInteractionSource() }
-  val pressed by interaction.collectIsPressedAsState()
   val shape = controlShape()
-  val bg = when {
-    !enabled -> container
-    pressed && pressedContainer != null -> pressedContainer
-    else -> container
-  }
-  Row(
+  Button(
+    onClick = onClick,
     modifier = modifier
       .alpha(if (enabled) 1f else 0.52f)
       .height(44.dp)
-      .clip(shape)
-      .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier)
-      .background(bg, shape)
-      .clickable(
-        interactionSource = interaction,
-        indication = null,
-        enabled = enabled,
-        onClick = onClick,
-      )
-      .padding(horizontal = 15.dp),
-    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-    verticalAlignment = Alignment.CenterVertically,
+      .then(if (border != null) Modifier.border(1.dp, border, shape) else Modifier),
+    enabled = enabled,
+    cornerRadius = DshmRadius.control.dp,
+    minHeight = 44.dp,
+    colors = ButtonColors(
+      color = container,
+      disabledColor = container,
+      contentColor = content,
+      disabledContentColor = content,
+    ),
   ) {
     if (icon != null) {
       Icon(icon, null, modifier = Modifier.size(18.dp), tint = content)
@@ -228,7 +226,7 @@ private fun BaseButton(
   }
 }
 
-/** 主按钮（.button-primary：accent 底 + on-accent 字，按压加深）。 */
+/** 主按钮（.button-primary：accent 底 + on-accent 字）。 */
 @Composable
 fun PrimaryButton(
   text: String,
@@ -242,7 +240,6 @@ fun PrimaryButton(
     text, onClick, modifier, enabled, icon,
     container = p.blue,
     content = p.onAccent,
-    pressedContainer = p.blueHover,
   )
 }
 
@@ -258,10 +255,9 @@ fun SecondaryButton(
   val p = LocalDshmPalette.current
   BaseButton(
     text, onClick, modifier, enabled, icon,
-    container = MaterialTheme.colorScheme.surface,
+    container = MiuixTheme.colorScheme.surface,
     content = p.blue,
     border = p.blueLine,
-    pressedContainer = p.blueSoft,
   )
 }
 
@@ -279,7 +275,6 @@ fun DangerButton(
     text, onClick, modifier, enabled, icon,
     container = p.red,
     content = Color.White,
-    pressedContainer = p.red.copy(alpha = 0.85f),
   )
 }
 
@@ -298,7 +293,6 @@ fun DangerQuietButton(
     container = p.redSoft,
     content = p.red,
     border = p.redLine,
-    pressedContainer = p.redSoft.copy(alpha = 0.7f),
   )
 }
 
@@ -338,7 +332,7 @@ fun InlineAlert(
       )
       Text(
         message,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
         fontSize = 12.5.sp,
         lineHeight = 18.sp,
       )
@@ -364,7 +358,7 @@ fun ProgressBlock(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(phase, fontSize = 13.sp, fontWeight = FontWeight(650), color = MaterialTheme.colorScheme.onSurface)
+      Text(phase, fontSize = 13.sp, fontWeight = FontWeight(650), color = MiuixTheme.colorScheme.onSurface)
       Text(
         if (progress != null) "${(progress * 100).toInt()}%" else "处理中",
         fontSize = 13.sp,
@@ -412,7 +406,7 @@ fun ProgressBlock(
         detail,
         fontSize = 11.sp,
         lineHeight = 15.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
   }
@@ -513,26 +507,28 @@ fun DetailRow(icon: ImageVector, label: String, value: String, modifier: Modifie
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Icon(icon, null, tint = p.muted, modifier = Modifier.size(17.dp))
-      Text(label, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+      Text(label, fontSize = 13.5.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
     Text(
       value,
       fontSize = 13.5.sp,
       fontWeight = FontWeight(650),
-      color = MaterialTheme.colorScheme.onSurface,
+      color = MiuixTheme.colorScheme.onSurface,
       textAlign = TextAlign.End,
     )
   }
 }
 
 /**
- * 设置/信息分组卡片（.settings-section）：16 圆角卡 + 外圈 1px 淡蓝环
- * （box-shadow 双描边：var(--shadow), 0 0 0 1px blue 7%）。
+ * 设置/信息分组卡片：miuix Card（HyperOS 卡片质感）+ 外圈 1px 淡蓝环
+ * （保留原 styles.css box-shadow 双描边的层次）。
+ * [trailing] 可选：标题行右侧的动作位（如「复制」按钮）。
  */
 @Composable
 fun SectionCard(
   title: String,
   modifier: Modifier = Modifier,
+  trailing: (@Composable () -> Unit)? = null,
   content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
   val p = LocalDshmPalette.current
@@ -542,28 +538,40 @@ fun SectionCard(
       .border(1.dp, p.blue.copy(alpha = 0.07f), cardShape())
       .padding(1.dp),
   ) {
-    Column(
-      modifier = Modifier
-        .fillMaxWidth()
-        .background(MaterialTheme.colorScheme.surface, cardShape())
-        .border(1.dp, p.line, cardShape())
-        .padding(18.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+    Card(
+      modifier = Modifier.fillMaxWidth(),
+      cornerRadius = DshmRadius.card.dp,
+      colors = CardColors(
+        color = MiuixTheme.colorScheme.surface,
+        contentColor = MiuixTheme.colorScheme.onSurface,
+      ),
     ) {
-      Text(
-        title,
-        fontSize = 15.sp,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface,
-      )
-      content()
+      Column(
+        modifier = Modifier.padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Row(
+          Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            title,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = MiuixTheme.colorScheme.onSurface,
+          )
+          trailing?.invoke()
+        }
+        content()
+      }
     }
   }
 }
 
 /**
- * iOS 风格分段控件（.segmented）：surface-muted 底 12 圆角容器内 3px padding，
- * 选中块 = 白面 8 圆角 + 小阴影 + ink 字，未选中 muted。
+ * 分段控件：miuix TabRow（HyperOS 滑块分段，选中块随动画滑动），
+ * 替代旧 iOS 风格手绘分段。
  */
 @Composable
 fun Segmented(
@@ -572,40 +580,12 @@ fun Segmented(
   onSelect: (Int) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val p = LocalDshmPalette.current
-  Row(
-    modifier
-      .fillMaxWidth()
-      .background(p.surfaceMuted, controlShape())
-      .border(1.dp, p.line, controlShape())
-      .padding(3.dp),
-    horizontalArrangement = Arrangement.spacedBy(3.dp),
-  ) {
-    options.forEachIndexed { index, label ->
-      val sel = index == selected
-      Row(
-        modifier = Modifier
-          .weight(1f)
-          .height(36.dp)
-          .then(if (sel) Modifier.shadow(2.dp, innerShape()) else Modifier)
-          .background(if (sel) MaterialTheme.colorScheme.surface else Color.Transparent, innerShape())
-          .clip(innerShape())
-          .clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-          ) { onSelect(index) },
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text(
-          label,
-          fontSize = 13.sp,
-          fontWeight = FontWeight(650),
-          color = if (sel) MaterialTheme.colorScheme.onSurface else p.muted,
-        )
-      }
-    }
-  }
+  TabRow(
+    tabs = options,
+    selectedTabIndex = selected,
+    onTabSelected = onSelect,
+    modifier = modifier.fillMaxWidth(),
+  )
 }
 
 /** 分类胶囊选择器（.settings-categories：999 胶囊，选中 accent 软底 + accent 描边）。 */
@@ -625,7 +605,7 @@ fun CapsuleSelector(
         modifier = Modifier
           .defaultMinSize(minHeight = 40.dp)
           .clip(shape)
-          .background(if (sel) p.blueSoft else p.surfaceMuted, shape)
+          .background(if (sel) p.blueSoft else MiuixTheme.colorScheme.surfaceVariant, shape)
           .border(1.dp, if (sel) p.blue else Color.Transparent, shape)
           .clickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -646,8 +626,8 @@ fun CapsuleSelector(
 }
 
 /**
- * 表单输入（.field）：12px 650 field-label 标签 + sunken 底输入框，
- * focus 时描边变 accent、底变 surface。
+ * 表单输入：miuix TextField（HyperOS 输入框 + 浮动标签动画）。
+ * 标签沿用 field-label 小字样式置于框上；hint 作为框下辅助小字（语义不变）。
  */
 @Composable
 fun DshmInputField(
@@ -660,42 +640,32 @@ fun DshmInputField(
   visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
   val p = LocalDshmPalette.current
-  val interaction = remember { MutableInteractionSource() }
-  val focused by interaction.collectIsFocusedAsState()
   Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = p.fieldLabel)
-    BasicTextField(
+    TextField(
       value = value,
       onValueChange = onValueChange,
+      modifier = Modifier.fillMaxWidth(),
       singleLine = true,
       textStyle = TextStyle(
         fontSize = 15.sp,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
         fontWeight = FontWeight.Medium,
       ),
       keyboardOptions = keyboardOptions,
       visualTransformation = visualTransformation,
-      interactionSource = interaction,
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(controlShape())
-        .background(if (focused) MaterialTheme.colorScheme.surface else p.surfaceMuted, controlShape())
-        .border(1.dp, if (focused) p.blue else p.lineStrong, controlShape())
-        .padding(horizontal = 12.dp, vertical = 13.dp),
-      cursorBrush = SolidColor(p.blue),
-      decorationBox = { inner ->
-        if (value.isEmpty() && hint != null) {
-          Text(hint, fontSize = 15.sp, color = p.muted)
-        }
-        inner()
-      },
+      insideMargin = TextFieldDefaults.InsideMargin,
+      label = "",
     )
+    if (hint != null) {
+      Text(hint, fontSize = 11.5.sp, lineHeight = 15.sp, color = p.muted)
+    }
   }
 }
 
 /**
- * 底部弹卡（.dialog 手机形态）：贴底 16 圆角卡、图标块 44/8px、标题 19/700、
- * 正文 13 muted、动作行右对齐 + 上分隔线；点外部关闭。
+ * 对话框：miuix OverlayDialog（HyperOS 弹窗：居中卡片、窗口压暗、缩放入场），
+ * 替代旧底部弹卡。签名保持兼容；danger 时确认键为红色实心。
  */
 @Composable
 fun DshmDialog(
@@ -714,97 +684,43 @@ fun DshmDialog(
   content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {},
 ) {
   val p = LocalDshmPalette.current
-  Dialog(
+  OverlayDialog(
+    show = true,
+    modifier = modifier,
+    title = title,
+    summary = message,
     onDismissRequest = onDismiss,
-    properties = DialogProperties(usePlatformDefaultWidth = false),
   ) {
-    Box(
-      Modifier
-        .fillMaxSize()
-        .clickable(
-          interactionSource = remember { MutableInteractionSource() },
-          indication = null,
-          onClick = onDismiss,
-        ),
-      contentAlignment = Alignment.BottomCenter,
-    ) {
-      Column(
-        modifier
-          .padding(14.dp)
-          .navigationBarsPadding()
-          .fillMaxWidth()
-          .shadow(10.dp, cardShape())
-          .background(MaterialTheme.colorScheme.surface, cardShape())
-          .border(1.dp, p.line, cardShape())
-          .clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null,
-            onClick = {},
-          )
-          .padding(23.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-      ) {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.Top,
-        ) {
-          if (icon != null) {
-            Box(
-              Modifier
-                .size(44.dp)
-                .background(if (danger) p.redSoft else p.amberSoft, innerShape()),
-              contentAlignment = Alignment.Center,
-            ) {
-              Icon(icon, null, tint = if (danger) p.red else p.amber, modifier = Modifier.size(22.dp))
-            }
-          }
-          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-              title,
-              fontSize = 19.sp,
-              fontWeight = FontWeight.Bold,
-              lineHeight = 24.sp,
-              color = MaterialTheme.colorScheme.onSurface,
-            )
-            if (message != null) {
-              Text(
-                message,
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
-            }
-          }
-        }
-        content()
-        Row(
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+      if (icon != null) {
+        Box(
           Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp)
-            .drawBehind {
-              drawLine(
-                color = p.lineFaint,
-                start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                end = androidx.compose.ui.geometry.Offset(size.width, 0f),
-                strokeWidth = 1.dp.toPx(),
-              )
-            }
-            .padding(top = 16.dp),
-          horizontalArrangement = Arrangement.spacedBy(9.dp),
+            .size(44.dp)
+            .background(if (danger) p.redSoft else p.amberSoft, innerShape()),
+          contentAlignment = Alignment.Center,
         ) {
-          if (dismissLabel != null) {
-            BaseButton(
-              dismissLabel, onDismissConfirm ?: onDismiss, Modifier.weight(1f),
-              container = MaterialTheme.colorScheme.surface,
-              content = p.muted,
-              border = p.lineStrong,
-            )
-          }
-          if (danger) {
-            DangerButton(confirmLabel, onConfirm, Modifier.weight(1f), enabled = confirmEnabled)
-          } else {
-            PrimaryButton(confirmLabel, onConfirm, Modifier.weight(1f), enabled = confirmEnabled)
-          }
+          Icon(icon, null, tint = if (danger) p.red else p.amber, modifier = Modifier.size(22.dp))
+        }
+      }
+      content()
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .padding(top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+      ) {
+        if (dismissLabel != null) {
+          BaseButton(
+            dismissLabel, onDismissConfirm ?: onDismiss, Modifier.weight(1f),
+            container = MiuixTheme.colorScheme.surface,
+            content = p.muted,
+            border = p.lineStrong,
+          )
+        }
+        if (danger) {
+          DangerButton(confirmLabel, onConfirm, Modifier.weight(1f), enabled = confirmEnabled)
+        } else {
+          PrimaryButton(confirmLabel, onConfirm, Modifier.weight(1f), enabled = confirmEnabled)
         }
       }
     }
@@ -862,13 +778,13 @@ fun SettingRow(
         title,
         fontSize = 14.sp,
         fontWeight = FontWeight(650),
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
       )
       Text(
         hint,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
     if (value != null) {
@@ -896,7 +812,7 @@ fun RowDivider(modifier: Modifier = Modifier) {
   Box(modifier.fillMaxWidth().height(1.dp).background(LocalDshmPalette.current.lineFaint))
 }
 
-/** 浮动提示条（.toast）：深底白字、12 圆角描边，两种主题下统一深色。 */
+/** 浮动提示条（.toast）：miuix Surface 承载，深底白字、12 圆角描边。 */
 @Composable
 fun ToastBar(
   message: String,

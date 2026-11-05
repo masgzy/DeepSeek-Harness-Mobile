@@ -85,19 +85,23 @@ object DistroCatalog {
     fallbackRef = "ubuntu:24.04",
   )
 
-  /** Alpine 3.22 官方 minirootfs 直链（2026-10 验证，dl-cdn + 国内三镜像）。 */
+  /**
+   * Alpine 3.23 官方 minirootfs 直链（2026-11 验证：aliyun/TUNA 双源下载 SHA-256 一致）。
+   * 选 3.23 而非 3.22：v3.22 仓库的 nodejs 停在 22.23.4（Node 22），
+   * v3.23 起才是 24.22.x —— 与 Paths.NODE_VERSION 的 Node 24 线对齐。
+   */
   private val ALPINE3_CDIMAGE = CdimageRef(
-    release = "3.22",
-    fileName = "alpine-minirootfs-3.22.7-aarch64.tar.gz",
-    sha256 = "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623",
+    release = "3.23",
+    fileName = "alpine-minirootfs-3.23.7-aarch64.tar.gz",
+    sha256 = "7dcc7420bcc426a615c0512cc85b4a52e9f89df9c600b93ce78d22e0e9234891",
     // 国内三镜像优先，官方 dl-cdn（Fastly，大陆不稳）垫底
     mirrors = listOf(
-      "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
-      "https://mirrors.ustc.edu.cn/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
-      "https://mirrors.aliyun.com/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
-      "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.7-aarch64.tar.gz",
+      "https://mirrors.aliyun.com/alpine/v3.23/releases/aarch64/alpine-minirootfs-3.23.7-aarch64.tar.gz",
+      "https://mirrors.tuna.tsinghua.edu.cn/alpine/v3.23/releases/aarch64/alpine-minirootfs-3.23.7-aarch64.tar.gz",
+      "https://mirrors.ustc.edu.cn/alpine/v3.23/releases/aarch64/alpine-minirootfs-3.23.7-aarch64.tar.gz",
+      "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/aarch64/alpine-minirootfs-3.23.7-aarch64.tar.gz",
     ),
-    fallbackRef = "alpine:3.22",
+    fallbackRef = "alpine:3.23",
   )
 
   const val CUSTOM_ID = "custom"
@@ -138,10 +142,10 @@ object DistroCatalog {
     ),
     Distro(
       id = "alpine3",
-      label = "Alpine 3.22",
-      detail = "musl · 极小体积",
+      label = "Alpine 3.23",
+      detail = "musl · 极小体积 · node 24",
       family = DistroFamily.ALPINE,
-      imageRef = "alpine:3.22",
+      imageRef = "alpine:3.23",
       cdimage = ALPINE3_CDIMAGE,
     ),
   )

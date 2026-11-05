@@ -20,10 +20,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -68,6 +70,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
   var noticeDanger by remember { mutableStateOf(false) }
   var installDraft by remember { mutableStateOf("") }
   var confirmRemove by remember { mutableStateOf<String?>(null) }
+  val clipboard = LocalClipboardManager.current
 
   fun refresh() {
     catalog = viewModel.pluginManager.catalog()
@@ -125,7 +128,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     ) {
       if (onBack != null) {
         IconButton(onClick = onBack) {
-          Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MaterialTheme.colorScheme.onSurface)
+          Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MiuixTheme.colorScheme.onSurface)
         }
       } else {
         Spacer(Modifier.width(12.dp))
@@ -134,12 +137,8 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
         "插件管理",
         fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
       )
-    }
-
-    if (notice != null) {
-      InlineAlert(title = if (noticeDanger) "操作失败" else "完成", message = notice!!, danger = noticeDanger)
     }
 
     // —— 已安装插件 ——
@@ -149,7 +148,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
           "尚未初始化 dsh profile（首次启动引擎后自动创建）。请先在「首页」启动一次引擎。",
           fontSize = 12.sp,
           lineHeight = 17.sp,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
       } else {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -161,7 +160,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
           Text(
             if (catalog.pnpmReady) "pnpm 就绪 · profile/web" else "pnpm 未安装（首次操作时自动补装）",
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
         if (catalog.plugins.isEmpty()) {
@@ -169,7 +168,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
             "暂无插件。使用下方「安装插件」添加 npm 包（dsh 插件生态以 @deepseek-ai/dsh-* 与社区包形式发布）。",
             fontSize = 12.sp,
             lineHeight = 17.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
         catalog.plugins.forEach { plugin ->
@@ -185,12 +184,12 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
                 plugin.name,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MiuixTheme.colorScheme.onSurface,
               )
               Text(
                 plugin.version,
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
               )
             }
             // 内置组合包只读展示；树外插件可移除
@@ -222,12 +221,14 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
     }
 
     // —— 安装插件 ——
+    // GitHub 适配：pnpm 原生支持 git+https://github.com/user/repo（可带 #tag/#commit）；
+    // git 依赖容器内已由 bootstrap 自动安装（Alpine apk add / GLIBC apt-get install）
     SectionCard("安装插件") {
       DshmInputField(
         value = installDraft,
         onValueChange = { installDraft = it },
-        label = "npm 包名（可带版本）",
-        hint = "如 @deepseek-ai/dsh-sandbox 或 @scope/plugin@1.2.3",
+        label = "npm 包名 / GitHub 仓库（可带版本）",
+        hint = "npm 包：@deepseek-ai/dsh-sandbox 或 @scope/plugin@1.2.3；GitHub：git+https://github.com/user/repo（可 #tag）",
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
       )
       PrimaryButton(
@@ -241,11 +242,17 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
         modifier = Modifier.fillMaxWidth(),
       )
       Text(
-        "安装会通过容器内 pnpm 拉取 npm 包并写入 profile；如切换过 npm 源，请在「设置」里选择合适的源后重试。",
+        "npm 包走容器内 pnpm 拉取；GitHub 仓库地址同样直接粘贴（容器已内置 git）。如切换过 npm 源，请在「设置」里选择合适的源后重试。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
+    }
+
+    // 操作结果提示：紧跟安装框下方（用户反馈：错误放页面顶部不直观，
+    // 与触发操作的输入框距离太远，来回找）
+    if (notice != null) {
+      InlineAlert(title = if (noticeDanger) "操作失败" else "完成", message = notice!!, danger = noticeDanger)
     }
 
     // —— 更新 ——
@@ -255,7 +262,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
         Text(
           "没有可更新的外部插件。",
           fontSize = 12.sp,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
       } else {
         externals.forEach { plugin ->
@@ -267,7 +274,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
               plugin.name,
               fontSize = 13.sp,
               fontWeight = FontWeight.Medium,
-              color = MaterialTheme.colorScheme.onSurface,
+              color = MiuixTheme.colorScheme.onSurface,
               modifier = Modifier.weight(1f),
             )
             Text(
@@ -287,9 +294,22 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
       }
     }
 
-    // —— 操作输出 ——
+    // —— 操作输出（带复制） ——
     if (opLog.isNotEmpty()) {
-      SectionCard("操作输出") {
+      SectionCard("操作输出", trailing = {
+        Text(
+          "复制",
+          fontSize = 12.sp,
+          fontWeight = FontWeight(650),
+          color = p.blue,
+          modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+            .clickableNoIndication {
+              clipboard.setText(AnnotatedString(opLog.joinToString("\n")))
+            }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+      }) {
         Column(
           Modifier
             .fillMaxWidth()
@@ -302,7 +322,7 @@ fun PluginsScreen(viewModel: AppViewModel, onBack: (() -> Unit)? = null) {
               line,
               fontSize = 11.sp,
               lineHeight = 15.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
           }
         }

@@ -20,9 +20,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Square
 import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -154,10 +154,10 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
               colorStops = arrayOf(
                 0f to androidx.compose.ui.graphics.lerp(
                   LocalDshmPalette.current.blueSoft,
-                  MaterialTheme.colorScheme.surface,
+                  MiuixTheme.colorScheme.surface,
                   0.35f,
                 ),
-                0.42f to MaterialTheme.colorScheme.surface,
+                0.42f to MiuixTheme.colorScheme.surface,
               ),
             ),
             panelShape,
@@ -184,7 +184,6 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
             CircularProgressIndicator(
               modifier = Modifier.size(26.dp),
               strokeWidth = 2.5.dp,
-              color = LocalDshmPalette.current.blue,
             )
           } else {
             AppMarkImage(38)
@@ -196,7 +195,7 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
             fontSize = 19.sp,
             fontWeight = FontWeight.SemiBold,
             lineHeight = 25.sp,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MiuixTheme.colorScheme.onSurface,
           )
           Text(
             detail(webUrl != null, running, launching, stopping),
@@ -307,7 +306,7 @@ fun HomeScreen(viewModel: AppViewModel, onOpenTerminal: () -> Unit = {}) {
       "在 proot 容器内打开交互式 bash，可直接管理环境与排查问题。",
       fontSize = 12.sp,
       lineHeight = 17.sp,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     )
 
     Spacer(Modifier.height(8.dp))

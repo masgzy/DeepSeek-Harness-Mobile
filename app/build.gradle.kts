@@ -142,6 +142,25 @@ val fetchProot by tasks.registering(Exec::class) {
 tasks.matching { it.name == "preBuild" || it.name.matches(Regex("pre[A-Za-z]+Build")) }
   .configureEach { dependsOn(fetchProot) }
 
+// ---------------------------------------------------------------------------
+// proroot（第二个容器运行时，可选/实验）自动注入：LD_PRELOAD 零 ptrace，
+// 引擎启动更快。同样由 Gradle 接管（缺件重试），下载失败不阻断构建 ——
+// proroot 缺席只影响「设置 → 容器运行时」的可选项，proot 路径不受影响。
+// ---------------------------------------------------------------------------
+val prorootMarker = file("src/main/jniLibs/arm64-v8a/libproroot.so")
+val fetchProroot by tasks.registering(Exec::class) {
+  group = "build setup"
+  description = "缺失时执行 scripts/fetch-proroot.sh 注入 proroot 运行时（可选）到 jniLibs"
+  workingDir = rootDir
+  commandLine("bash", "scripts/fetch-proroot.sh")
+  outputs.file(prorootMarker)
+  onlyIf {
+    !prorootMarker.exists() && System.getenv("PROOT_SKIP_FETCH") != "1"
+  }
+}
+tasks.matching { it.name == "preBuild" || it.name.matches(Regex("pre[A-Za-z]+Build")) }
+  .configureEach { dependsOn(fetchProroot) }
+
 dependencies {
   val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
   implementation(composeBom)
@@ -156,6 +175,11 @@ dependencies {
   implementation("androidx.compose.material3:material3")
   implementation("androidx.compose.material:material-icons-extended:1.7.8")
   implementation("androidx.navigation:navigation-compose:2.10.2")
+
+  // miuix（HyperOS 设计语言 Compose 组件库）：全部外壳界面统一迁移至此
+  // （dsh web 的 HarnessActivity WebView 与终端区不在此列）。M3 依赖暂留
+  // 作为编译过渡垫片，外壳代码已不再 import。
+  implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.4")
 
   // rootfs 归档解包：tar 解析 + gzip/xz 解压
   implementation("org.apache.commons:commons-compress:1.28.0")

@@ -102,3 +102,64 @@ ConfigStore（配置读写）
 3. **运行时产物 manifest 化**：为未来预装 bundle/增量更新铺路。
 4. **AGENTS.md 契约文档**：把启动契约、停止不变式、已知 trap 固化成
    贡献者必读（本仓库已有 architecture.md，可扩一节 invariants）。
+
+## 6. dsh-Go bridge 补丁机制深挖（2026-11）
+
+对 dsh-Go `runtime/` 目录的完整逆向结论（供未来引入原生桥/补丁链时对照）：
+
+### 6.1 bridge 本体
+
+- **形态**：纯 JS（Node ESM）cordis 插件，零 npm 依赖；宿主半侧 `lib/index.js`
+  （`apply(ctx)` → `ctx.provide("dshGo", …)` + 注册 `/dsh-go/v1/*` HTTP/WS 路由
+  + `installFallbackGuard()` 兜底鉴权）+ 浏览器半侧 `lib/client.js`
+  （`window.__ModuleLoader__.load(...)`）。
+- **注入**：rootfs 内固定路径 `/opt/dsh-go/dsh-go-bridge/lib/index.js`，启动时
+  `dsh web --patch /etc/dsh-app/dsh-web.patch.yml`，patch 文件内容即
+  `- insert: - id: dsh-go-bridge, name: <绝对路径>` —— **insert.name 支持绝对
+  路径直接加载**，不需要先 npm install。
+- **多 patch 叠加**：`--patch` 可多次传入（safe mode / 手机操控 / 消息搜索
+  各自独立 overlay 文件，文件存在才追加）。
+
+### 6.2 补丁注册表（patches/pins.json + rtbuild.py）
+
+- `pins.json`（schema 1）：`patches.<diff 名>.<dsh 版本>.<文件路径> =
+  {before, after}` —— 每个补丁对每个 dsh 版本、每个目标文件锁定
+  **原始/补丁后双 SHA-256**；
+- 应用器规则：按文件名字典序应用（`z…/zz…` 前缀控制链序）；hunk 上下文
+  **必须唯一匹配**（count != 1 即失败重审）；多补丁同文件时前后哈希成链
+  （broken patch chain 即失败）；`.dsh-app-patch` 临时文件 + rename 原子写；
+  未 vet 的 dsh 版本构建直接失败，需 `--record` 人工审阅写回；
+- 幂等：已补丁树再次应用时按 after 哈希识别并跳过。
+
+### 6.3 本项目决策
+
+- 不引入 dsh-Go bridge（无原生聊天外壳需求，WebView 直开 dsh web，
+  `HarnessActivity` 自愈逻辑已覆盖 token 过期/断线）；
+- 补丁链目前只有 koffi musl 槽位补丁一处，bootstrap.sh 内联成本更低；
+  当补丁数 ≥3 或需要按 dsh 版本区分时，按 §6.2 的 pins.json 形态 JSON 化
+  （对应 §5 候选 2）；
+- **已吸收**：pid 文件停机协议（`echo $$ > /tmp/dshm-engine.pid; exec dsh web …`
+  + 停止时先 TERM guest node 再处理启动器，EngineManager.stopEngine）；
+  proroot 双运行时（§7）。
+
+## 7. proroot 第二运行时（2026-11，DSHA 同款）
+
+- **机制**：coderredlab/proroot v1.2.8（专有二进制，DSHA 公开仓库随包分发
+  同一批字节），进程内路径翻译（LD_PRELOAD + 二进制补丁），零 ptrace ——
+  引擎启动/文件 I/O 显著快于 proot。
+- **构成**：五件套（libproroot.so / -runtime / -linker / -stub-loader / -bridge）
+  必须同目录 + DSHA 两个自研兼容 shim：`libdsha-proroot-compat.so`
+  （glibc sysconf(75/249/250) 代理，修 Android 13+ sigstksz 断言崩溃）、
+  `libdsha-proroot-linker.so`（无依赖入口适配器，把 shim 以 --preload 接进
+  上游加载器）。七件全部 SHA-256 锁定（`scripts/fetch-proroot.sh`，
+  jsdelivr → GitHub raw 双源，失败不阻断构建）。
+- **argv/env**（`ProotRuntime.buildProrootArgs`）：`libproroot.so
+  [--static-loader|--no-static-loader] -r <rootfs> -0 -w /root -b …
+  -b <cacheDir>/shm:/dev/shm --link2symlink`；env 三件：
+  `PROROOT_TMP_DIR` / `PROROOT_LIB_PATH`（runtime 保持直接预加载）/
+  `PROROOT_LINKER_PATH`（DSHA 入口适配器），static 模式加 `PROROOT_STUB_LOADER`。
+- **停止差异**：proroot **没有 kill-on-exit**，杀启动器不传播信号 ——
+  统一走 pid 文件方案（与 proot 相同代码路径）：停止 = TERM guest node（1s）→
+  KILL guest（1s）→ KILL 启动器（0.5s）→ /proc 特征扫描兜底。
+- **选择入口**：设置 → 运行环境 → 容器运行时（prefs `container_runtime`）；
+  缺件时 UI 如实提示并回退 proot。

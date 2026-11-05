@@ -27,9 +27,9 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -57,8 +57,10 @@ import io.github.masgzy.dshm.ui.components.InlineAlert
 import io.github.masgzy.dshm.ui.components.NodeVersionPickerDialog
 import io.github.masgzy.dshm.ui.components.PrimaryButton
 import io.github.masgzy.dshm.ui.components.SecondaryButton
+import io.github.masgzy.dshm.ui.components.Segmented
 import io.github.masgzy.dshm.ui.components.SectionCard
 import io.github.masgzy.dshm.ui.screens.RuntimePickersRow
+import io.github.masgzy.dshm.engine.ProotRuntime
 import io.github.masgzy.dshm.ui.theme.LocalDshmPalette
 import io.github.masgzy.dshm.util.AppLog
 
@@ -109,7 +111,7 @@ fun SettingsScreen(
           "npm 源（安装 / 更新 dsh 时使用）",
           fontSize = 14.sp,
           fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = MiuixTheme.colorScheme.onSurface,
         )
         CapsuleSelector(
           options = listOf("国内镜像", "官方源"),
@@ -146,12 +148,88 @@ fun SettingsScreen(
         if (running) "dsh web 正在运行（可在首页「打开对话」进入）" else "引擎未运行；也可直接在首页打开对话（自动拉起）。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
       DetailLine("架构", "arm64-v8a")
       DetailLine("系统版本", distro.display)
       DetailLine("网络访问", "仅本应用内（127.0.0.1）")
-      DetailLine("运行组件", if (viewModel.engineManager.isRunnerAvailable) "可用" else "不可用")
+
+      // —— 容器运行时（proot 稳定 / proroot 零 ptrace 实验，DSHA 同款双运行时） ——
+      // proroot 无 ptrace 开销，引擎启动与文件 I/O 明显更快；但无 kill-on-exit，
+      // 停止走 pid 文件精确杀（EngineManager 已适配）。缺件时如实提示。
+      val context = androidx.compose.ui.platform.LocalContext.current
+      val prootRuntime = remember { ProotRuntime(context) }
+      var runtimeKind by remember { mutableStateOf(prootRuntime.runtimeKind) }
+      var staticLoader by remember { mutableStateOf(prootRuntime.prorootStaticLoader) }
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          "容器运行时",
+          fontSize = 12.sp,
+          fontWeight = FontWeight(650),
+          color = LocalDshmPalette.current.fieldLabel,
+        )
+        Segmented(
+          options = listOf(
+            "proot · 稳定",
+            "proroot · 零 ptrace",
+          ),
+          selected = if (runtimeKind == ProotRuntime.RuntimeKind.PROOT) 0 else 1,
+          onSelect = { i ->
+            val next = if (i == 0) ProotRuntime.RuntimeKind.PROOT else ProotRuntime.RuntimeKind.PROROOT
+            if (next != runtimeKind) {
+              prootRuntime.setRuntime(next)
+              runtimeKind = next
+            }
+          },
+        )
+        val missing = prootRuntime.missingComponents()
+        Text(
+          when {
+            runtimeKind == ProotRuntime.RuntimeKind.PROOT ->
+              "proot：Termux ptrace 翻译，兼容性最好；停止/启动走 kill-on-exit。"
+            missing.isNotEmpty() ->
+              "proroot 缺少组件：${missing.joinToString()} —— 请从官方 Release 重新下载 APK。当前将回退用 proot 启动。"
+            else ->
+              "proroot：进程内路径翻译、无 ptrace，引擎启动更快（实验性）；如遇异常请切回 proot。"
+          },
+          fontSize = 12.sp,
+          lineHeight = 17.sp,
+          color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        if (runtimeKind == ProotRuntime.RuntimeKind.PROROOT && missing.isEmpty()) {
+          Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column {
+              Text("静态加载器模式", fontSize = 13.5.sp, fontWeight = FontWeight(650), color = MiuixTheme.colorScheme.onSurface)
+              Text(
+                "加载器异常（exit 139）时开启；DSHA 兼容层自动接管 sysconf",
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+              )
+            }
+            top.yukonga.miuix.kmp.basic.Switch(
+              checked = staticLoader,
+              onCheckedChange = {
+                prootRuntime.setProrootStaticLoader(it)
+                staticLoader = it
+              },
+            )
+          }
+        }
+      }
+
+      DetailLine(
+        "运行组件",
+        if (viewModel.engineManager.isRunnerAvailable) {
+          "${prootRuntime.runtimeKind.label} 可用"
+        } else {
+          "不可用"
+        },
+      )
     }
 
     // —— 镜像源测速 ——
@@ -173,7 +251,7 @@ fun SettingsScreen(
           "自动选用最快的并写入容器（/etc/apt、/etc/apk），安装时同样生效。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
       if (probe.error != null) {
         InlineAlert(title = "测速失败", message = probe.error!!, danger = true)
@@ -183,7 +261,7 @@ fun SettingsScreen(
           "apt 镜像（当前：${aptMirrorLabel(viewModel)}）",
           fontSize = 12.5.sp,
           fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = MiuixTheme.colorScheme.onSurface,
         )
         probe.apt.forEach { MirrorResultRow(it) }
       }
@@ -192,7 +270,7 @@ fun SettingsScreen(
           "apk 镜像（当前：${apkMirrorLabel(viewModel)}）",
           fontSize = 12.5.sp,
           fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = MiuixTheme.colorScheme.onSurface,
         )
         probe.apk.forEach { MirrorResultRow(it) }
       }
@@ -218,7 +296,7 @@ fun SettingsScreen(
         "插件管理已移至底部导航「插件」页。",
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
 
@@ -238,7 +316,7 @@ fun SettingsScreen(
           "日志等级",
           fontSize = 14.sp,
           fontWeight = FontWeight.Medium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = MiuixTheme.colorScheme.onSurface,
         )
         CapsuleSelector(
           options = listOf("详细", "标准", "精简"),
@@ -252,7 +330,7 @@ fun SettingsScreen(
           "详细含诊断细节（轮询/逐镜像探测）；精简仅保留警告与错误。日志页还可用「级别」临时过滤。",
           fontSize = 12.sp,
           lineHeight = 16.sp,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
       }
       if (AppLog.crashLogFile.isFile) {
@@ -284,7 +362,7 @@ fun SettingsScreen(
           "预装运行时 bundle 仅提供 Ubuntu 26.04 组合。",
         fontSize = 11.5.sp,
         lineHeight = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
 
@@ -316,7 +394,7 @@ fun SettingsScreen(
         "卸载将删除容器 rootfs 与全部缓存（工作区文件保留）。下次使用需重新安装。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
 
@@ -412,13 +490,13 @@ private fun SettingRow(
         title,
         fontSize = 14.sp,
         fontWeight = FontWeight.Medium,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
       )
       Text(
         hint,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
     if (value != null) {
@@ -448,12 +526,12 @@ private fun DetailLine(label: String, value: String) {
     horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(label, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+    Text(label, fontSize = 13.5.sp, color = MiuixTheme.colorScheme.onSurface)
     Text(
       value,
       fontSize = 13.5.sp,
       fontWeight = FontWeight.SemiBold,
-      color = MaterialTheme.colorScheme.onSurface,
+      color = MiuixTheme.colorScheme.onSurface,
     )
   }
 }
@@ -469,7 +547,7 @@ private fun MirrorResultRow(result: io.github.masgzy.dshm.util.MirrorProbe.Resul
     Text(
       result.mirror.name,
       fontSize = 12.5.sp,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     )
     Text(
       if (result.latencyMs != null) "${result.latencyMs} ms" else "不可达",
@@ -482,7 +560,7 @@ private fun MirrorResultRow(result: io.github.masgzy.dshm.util.MirrorProbe.Resul
           else -> Color(0xFFB08D57)
         }
       } else {
-        MaterialTheme.colorScheme.error
+        MiuixTheme.colorScheme.error
       },
     )
   }

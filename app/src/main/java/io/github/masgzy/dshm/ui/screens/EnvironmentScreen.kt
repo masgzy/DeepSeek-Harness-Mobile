@@ -26,9 +26,9 @@ import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.RestoreFromTrash
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -144,7 +144,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
               LocalDshmPalette.current.blueSoft,
               0.48f,
             ),
-            1f to MaterialTheme.colorScheme.surface,
+            1f to MiuixTheme.colorScheme.surface,
           ),
           overviewShape,
         )
@@ -173,7 +173,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             distro.label,
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MiuixTheme.colorScheme.onSurface,
           )
           Text(
             when {
@@ -183,7 +183,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
               else -> "等待安装 · ${distro.detail}"
             },
             fontSize = 12.5.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
         StatusBadge(
@@ -243,7 +243,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             },
             fontSize = 12.sp,
             lineHeight = 17.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
           if (distro.id == "ubuntu26") {
             SecondaryButton(
@@ -257,7 +257,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
                 "SHA-256 校验后一键启用，无需容器内联网安装（仅 Ubuntu 26.04 提供）。",
               fontSize = 12.sp,
               lineHeight = 17.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
           }
         }
@@ -267,7 +267,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
             "安装时会校验运行时完整性；从网络下载的，中断后可以重试继续。",
             fontSize = 12.sp,
             lineHeight = 17.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
 
@@ -300,7 +300,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
               "下次使用需重新安装。",
             fontSize = 12.sp,
             lineHeight = 17.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
       }
@@ -375,7 +375,7 @@ fun EnvironmentScreen(viewModel: AppViewModel, isOnboarding: Boolean = false) {
         fontSize = 12.sp,
         lineHeight = 18.sp,
         textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         modifier = Modifier.fillMaxWidth(),
       )
     }
@@ -480,7 +480,7 @@ internal fun RuntimePickersRow(
     horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Text(title, fontSize = 13.5.sp, color = MaterialTheme.colorScheme.onSurface)
+    Text(title, fontSize = 13.5.sp, color = MiuixTheme.colorScheme.onSurface)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
       Text(
         value,

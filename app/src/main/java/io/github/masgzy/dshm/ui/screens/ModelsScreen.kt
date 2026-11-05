@@ -23,10 +23,10 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -112,13 +112,13 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
       verticalAlignment = Alignment.CenterVertically,
     ) {
       IconButton(onClick = onBack) {
-        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MaterialTheme.colorScheme.onSurface)
+        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回", tint = MiuixTheme.colorScheme.onSurface)
       }
       Text(
         "模型配置",
         fontSize = 20.sp,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MiuixTheme.colorScheme.onSurface,
       )
     }
 
@@ -136,7 +136,7 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         "填入 API Key 后即可在 dsh 对话里选用对应模型。Key 加密存于本机，并写进容器凭据文档。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
       ModelConfigManager.BUILTINS.forEach { provider ->
         val configured = config.builtinKeys[provider.id]?.isNotBlank() == true
@@ -163,12 +163,12 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
               provider.label,
               fontSize = 14.sp,
               fontWeight = FontWeight.Medium,
-              color = MaterialTheme.colorScheme.onSurface,
+              color = MiuixTheme.colorScheme.onSurface,
             )
             Text(
               provider.envName,
               fontSize = 11.sp,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
           }
           StatusDot(configured)
@@ -188,7 +188,7 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         "会话默认使用的模型：provider 为内置 id（deepseek / openai / anthropic / google / openrouter / groq / xai / mistral）或自定义供应商标识。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
       val current = if (config.defaultProvider != null) {
         "${config.defaultProvider} / ${config.defaultModel}"
@@ -209,13 +209,13 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             "会话默认模型",
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MiuixTheme.colorScheme.onSurface,
           )
           Text(
             current,
             fontSize = 12.sp,
             lineHeight = 16.sp,
-            color = if (config.defaultProvider != null) p.blue else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (config.defaultProvider != null) p.blue else MiuixTheme.colorScheme.onSurfaceVariantSummary,
           )
         }
         Text("修改", fontSize = 12.sp, color = p.blue, fontWeight = FontWeight(650))
@@ -228,7 +228,7 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         "接入任意 OpenAI 兼容 / Anthropic 兼容中转。声明后可在 dsh 中按「供应商标识 / 模型 ID」选用。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
       config.customProviders.forEach { provider ->
         Column(
@@ -246,17 +246,17 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 provider.name,
                 fontSize = 14.sp,
                 fontWeight = FontWeight(650),
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MiuixTheme.colorScheme.onSurface,
               )
               Text(
                 provider.id + " · " + provider.api,
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
               )
               Text(
                 provider.baseUrl,
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 maxLines = 1,
               )
             }
@@ -303,7 +303,7 @@ fun ModelsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         "保存后配置立即写入容器。引擎未运行时，下次启动自动生效；引擎运行中，重启引擎（环境页）后生效。",
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
       )
     }
   }
@@ -495,7 +495,7 @@ private fun ProbeResultLine(result: ProviderProbe.Result?) {
     result.message + (if (result.httpStatus != null) " · ${result.latencyMs}ms" else ""),
     fontSize = 12.sp,
     lineHeight = 16.sp,
-    color = if (result.ok) p.blue else MaterialTheme.colorScheme.error,
+    color = if (result.ok) p.blue else MiuixTheme.colorScheme.error,
   )
 }
 
@@ -599,7 +599,7 @@ private fun CustomProviderDialog(
       DshmInputField(idDraft, { idDraft = it.trim().lowercase() }, "供应商标识（唯一）", hint = "如 my-relay")
       DshmInputField(nameDraft, { nameDraft = it }, "显示名称", hint = "默认同标识")
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("接口类型", fontSize = 12.sp, fontWeight = FontWeight(650), color = MaterialTheme.colorScheme.onSurface)
+        Text("接口类型", fontSize = 12.sp, fontWeight = FontWeight(650), color = MiuixTheme.colorScheme.onSurface)
         Segmented(
           options = listOf("OpenAI", "Responses", "Anthropic"),
           selected = apiSelected,

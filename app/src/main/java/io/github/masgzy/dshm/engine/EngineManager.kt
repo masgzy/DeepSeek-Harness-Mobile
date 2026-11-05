@@ -75,6 +75,9 @@ class EngineManager(private val context: Context) {
     }
   }
 
+  /** 容器内 pid 文件路径（guest 侧）；宿主侧对应 rootfs/tmp/ 同名文件。 */
+  private val GUEST_PID_FILE = "/tmp/dshm-engine.pid"
+
   /** 容器 + dsh 均就绪才允许启动。 */
   val engineReady: Boolean
     get() = Paths.rootfsUsable(rootfsDir) && Paths.dshInstalled(rootfsDir)
@@ -118,7 +121,12 @@ class EngineManager(private val context: Context) {
       return false
     }
     if (!prootRuntime.runnerAvailable()) {
-      AppLog.log("engine", "proot 运行器缺失（nativeLibraryDir 无 libdsh_proot.so/libdsh_proot_loader.so）")
+      val missing = prootRuntime.missingComponents()
+      AppLog.log(
+        "engine",
+        "运行器缺失（runtime=${prootRuntime.runtimeKind.id}" +
+          if (missing.isEmpty()) ")" else "，缺 ${missing.joinToString()}",
+      )
       return false
     }
     if (EngineProbe.check(port)) {
@@ -182,15 +190,24 @@ class EngineManager(private val context: Context) {
       rootfsDir,
       binds,
       envPairs,
-      listOf("dsh", "web", "--no-open", "--port", port.toString()),
+      // pid 文件技巧（dsh-Go 同款）：echo $$ 写下 sh 的 pid，exec 后同一 pid 变成
+      // guest node —— 停止时对它精确 SIGTERM（dsh dispose 插件后 0 退出），
+      // proot 的 --kill-on-exit / proroot 的父子收尸随后收场。直接 TERM proot 是
+      // 无效的：proot 忽略 SIGTERM/SIGINT/SIGHUP，旧实现因此每次都白等 5s 超时。
+      listOf(
+        "/bin/sh", "-c",
+        "echo \$\$ > $GUEST_PID_FILE 2>/dev/null; exec dsh web --no-open --port $port",
+      ),
     )
     return try {
-      AppLog.log("engine", "启动 dsh web (port=$port)")
-      // 完整 proot 启动命令落日志：用户反馈「proot 启动命令和结果啥的也没有」，
+      AppLog.log("engine", "启动 dsh web (port=$port, runtime=${prootRuntime.runtimeKind.id})")
+      // 完整启动命令落日志：用户反馈「proot 启动命令和结果啥的也没有」，
       // 出问题时可对照命令逐段排查（不含敏感信息，token 由 dsh web 运行时生成）
-      AppLog.log("engine", "proot 命令: " + argv.joinToString(" "))
+      AppLog.log("engine", "容器命令: " + argv.joinToString(" "))
       engineLog.parentFile?.mkdirs()
       webUrl.value = null
+      // 上次的 pid 文件必须先删：残留旧 pid 会误导停止逻辑（PID 复用防护见 readGuestEnginePid）
+      runCatching { pidFile().delete() }
       val builder = ProcessBuilder(argv)
       builder.environment().putAll(prootRuntime.hostEnv())
       builder.redirectErrorStream(true)
@@ -251,24 +268,36 @@ class EngineManager(private val context: Context) {
   }
 
   /**
-   * 停止引擎：SIGTERM 给 proot 5s 优雅退出（--kill-on-exit 连带清理容器内子进程），
-   * 超时则 SIGKILL 强杀（再给 2s）。旧实现 waitFor() 无限等待，proot 清理慢时
-   * 调用线程（含 EngineService.onDestroy 的主线程路径）被拖住十秒以上 → ANR 闪退。
+   * 停止引擎（pid 文件精确杀，典型耗时 ~1s，最坏 ~3s）。
    *
-   * 另处理孤儿引擎：APP 重启后附着存活引擎时 current == null（句柄已丢失），
-   * 此时停止必须扫宿主 /proc 找到 proot/dsh 进程树强杀，否则 dsh web 继续应答、
-   * 「点击停止不会停止」。杀完以端口探测复核。
+   * 时序（设计对齐 dsh-Go 的停机协议，替代旧实现「TERM proot 白等 5s」）：
+   *  1. 读 pid 文件定位 guest node（cmdline+uid 双重验证防 PID 复用误杀），SIGTERM ——
+   *     dsh 会 dispose 全部插件后以 0 退出；proot 的 --kill-on-exit / proroot 的
+   *     父子收尸随后把启动器一并带走；
+   *  2. 1s 内未收场 → SIGKILL guest node（android.os.Process.killProcess）；
+   *  3. 启动器仍活着 → destroyForcibly()（SIGKILL），再给 0.5s；
+   *  4. 端口仍应答（APP 重启附着等句柄丢失场景）→ /proc 特征扫描孤儿清理。
    */
   fun stopEngine() {
     synchronized(LOCK) {
     val proc = current
+    val guestPid = readGuestEnginePid()
+    if (guestPid != null) {
+      runCatching { android.system.Os.kill(guestPid, android.system.OsConstants.SIGTERM) }
+        .onFailure { AppLog.log("engine", "SIGTERM guest($guestPid) 失败: ${it.message}") }
+    }
     if (proc != null) {
       try {
-        proc.destroy()
-        if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-          AppLog.log("engine", "SIGTERM 5s 未退出，SIGKILL 强制结束")
-          proc.destroyForcibly()
-          proc.waitFor(2, TimeUnit.SECONDS)
+        if (!proc.waitFor(1, TimeUnit.SECONDS)) {
+          if (guestPid != null) {
+            AppLog.log("engine", "guest 1s 未退出，SIGKILL 兜底")
+            runCatching { android.os.Process.killProcess(guestPid) }
+          }
+          if (!proc.waitFor(1, TimeUnit.SECONDS)) {
+            AppLog.log("engine", "启动器 2s 未退出，SIGKILL 强制结束")
+            proc.destroyForcibly()
+            proc.waitFor(500, TimeUnit.MILLISECONDS)
+          }
         }
         AppLog.log("engine", "引擎已停止")
       } catch (t: Throwable) {
@@ -283,9 +312,38 @@ class EngineManager(private val context: Context) {
         AppLog.log("engine", "孤儿引擎清理：终止 $killed 个残留进程（当前句柄 ${if (proc == null) "缺失" else "已退出"}）")
       }
     }
+    runCatching { pidFile().delete() }
     current = null
     webUrl.value = null
     }
+  }
+
+  /** 宿主侧看到的 guest pid 文件（容器 /tmp 即 rootfs/tmp，无单独绑定）。 */
+  private fun pidFile(): File = File(rootfsDir, "tmp/dshm-engine.pid")
+
+  /**
+   * 从 pid 文件读 guest node 的宿主 pid，并做防误杀验证：
+   *  - /proc/<pid>/cmdline 必须同时含 "dsh" 与 "web"（exec 后的 node 命令行）；
+   *  - /proc/<pid>/status 的 Uid 必须等于本应用 uid（hidepid/复用防护）。
+   * 任一验证不过按「无 pid」处理（走孤儿扫描兜底）。
+   */
+  private fun readGuestEnginePid(): Int? {
+    val f = pidFile()
+    if (!f.isFile) return null
+    val pid = runCatching { f.readText().trim().toIntOrNull() }.getOrNull() ?: return null
+    if (pid <= 1 || pid == android.os.Process.myPid()) return null
+    val cmdline = runCatching {
+      File("/proc/$pid/cmdline").readBytes().toString(Charsets.UTF_8)
+        .split('\u0000').filter { it.isNotBlank() }
+    }.getOrNull() ?: return null
+    if (!cmdline.any { it.contains("dsh") } || !cmdline.any { it.contains("web") }) return null
+    val uidOk = runCatching {
+      File("/proc/$pid/status").bufferedReader().useLines { lines ->
+        lines.firstOrNull { it.startsWith("Uid:") }?.split(Regex("\\s+"))?.get(1)?.toInt()
+      }
+    }.getOrNull() == android.os.Process.myUid()
+    if (!uidOk) return null
+    return pid
   }
 
   /**
@@ -313,8 +371,9 @@ class EngineManager(private val context: Context) {
       killed++
     }
     if (killed == 0) return 0
-    // 给 SIGTERM 最多 3 秒生效窗口，仍存活的（proot/tracee）直接 SIGKILL
-    val deadline = System.currentTimeMillis() + 3_000
+    // 给 SIGTERM 最多 1.5 秒生效窗口，仍存活的（proot/tracee）直接 SIGKILL
+    // （旧值 3s：停止链路压缩后，这里不再需要更长等待）
+    val deadline = System.currentTimeMillis() + 1_500
     while (System.currentTimeMillis() < deadline) {
       val alive = survivingEnginePids()
       if (alive.isEmpty()) break

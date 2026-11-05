@@ -76,8 +76,9 @@ if [ "$DSHM_FAMILY" = "alpine" ]; then
     log "  源: $ALPINE_MIRROR/$ALPINE_BRANCH"
     # libstdc++ 是 koffi/node-pty musl 预编译二进制的硬依赖，缺失时
     # optionalDependencies 的 .node 加载失败 → 回退源码编译 → 无 CMake 中止
-    log "[alpine/2] apk add --no-cache bash nodejs npm coreutils libstdc++（需网络）..."
-    apk add --no-cache bash nodejs npm coreutils libstdc++ \
+    log "[alpine/2] apk add --no-cache bash nodejs npm coreutils libstdc++ git（需网络）..."
+    # git：插件支持从 GitHub 安装（pnpm add git+https://github.com/... 硬依赖 git）
+    apk add --no-cache bash nodejs npm coreutils libstdc++ git \
       || fail "apk 安装失败（检查网络 / 镜像源：$ALPINE_MIRROR）"
     command -v node >/dev/null 2>&1 || fail "apk nodejs 安装后 node 仍不可用"
     log "  node $(node --version) / npm $(npm --version) 就绪"
@@ -122,6 +123,15 @@ if [ "$DSHM_FAMILY" != "alpine" ]; then
   log "[1/5] 解压 Node.js 到 /usr/local ..."
   mkdir -p /usr/local
   tar -xzf "$NODE_ARCHIVE" --strip-components=1 -C /usr/local
+
+  # git：插件支持从 GitHub 安装（pnpm add git+https://github.com/... 硬依赖 git）；
+  # ubuntu-base/debian 无自带 git，best-effort 安装，失败不阻断（无 git 时仍可用 npm 源装插件）
+  if ! command -v git >/dev/null 2>&1; then
+    log "  安装 git（插件 GitHub 源依赖，best-effort）..."
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null 2>&1 \
+      || log "  警告：git 安装失败，插件将仅支持 npm 源安装"
+  fi
 
   # W^X 兼容（华为/EMUI）：node ELF 不可写才能被 exec
   chmod 0555 /usr/local/bin/node 2>/dev/null || true

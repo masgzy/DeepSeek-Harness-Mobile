@@ -8,6 +8,48 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **proroot 第二容器运行时**（设计对齐 DSHA）：proot 之外新增 coderredlab/proroot
+  v1.2.8（LD_PRELOAD 进程内路径翻译、零 ptrace）——引擎启动与文件 I/O 明显更快；
+  五件套 + DSHA 双兼容 shim（sysconf 代理修 Android 13+ sigstksz 崩溃、入口适配器）
+  全部 SHA-256 字节锁定，由 `scripts/fetch-proroot.sh` 构建期自动注入（失败不阻断）；
+  设置 → 运行环境可切换，缺件如实提示并回退 proot；proroot 无 kill-on-exit，
+  停止走 pid 文件精确杀（见下）。
+- **miuix 全量界面迁移**：外壳全部界面（首页/环境/插件/设置/日志/模型/终端顶栏）
+  从手绘 styles.css 复刻迁移到 miuix（top.yukonga.miuix.kmp v0.9.4，HyperOS 设计
+  语言）——Button/Card/TabRow/TextField/OverlayDialog/NavigationBar/Surface 全部
+  miuix 组件，品牌蓝与语义扩展色保留；dsh web（HarnessActivity）与终端渲染区
+  不在迁移范围。
+- **插件支持 GitHub 仓库安装**：安装框支持 npm 包名之外的
+  `git+https://github.com/user/repo`（可 #tag/#commit）；bootstrap 两分支自动
+  安装 git（Alpine apk / GLIBC apt，best-effort）。
+- **插件操作日志一键复制**：「操作输出」卡片标题行新增「复制」。
+
+### 优化
+
+- **引擎停止提速（~10s → ~1s，最坏 ~3s）**：启动命令改为
+  `sh -c 'echo $$ > /tmp/dshm-engine.pid; exec dsh web …'`（dsh-Go 同款 pid 文件），
+  停止时先对 guest node 精确 SIGTERM（proot 忽略 SIGTERM/SIGINT/SIGHUP，旧实现
+  TERM 启动器只能白等 5s 超时），1s 未退 SIGKILL guest，再 1s 未退才 SIGKILL
+  启动器；孤儿扫描等待窗口 3s → 1.5s；PID 复用防护（cmdline + uid 双验证）。
+- **rootfs 下载提速**：分段并行阈值 4MB → 1MB —— alpine-minirootfs（~3.9MB）
+  旧值下永远走单流慢速路径，是「下载十来秒」的主因；现 4MB 文件也能 4 段并行。
+
+### 变更
+
+- **版本升级（2026-11 核查）**：dsh 0.2.1-rc.2 → **0.2.2-rc.1**（npm latest）；
+  Node v24.22.0 → **v24.22.2**（v24 LTS Krypton 线）；Alpine rootfs 3.22.7 →
+  **3.23.7**（v3.22 仓库 nodejs 停在 22.23.4，v3.23 起为 24.22.x，与 Node 24
+  线对齐；新 SHA-256 经 aliyun/TUNA 双源实测一致）。
+
+### 修复
+
+- **终端 CTRL 键显示不全**：11 键行窄屏下每键 ~30dp，15sp 的 "CTRL" 被默认
+  裁切成 "CTR" —— 改为文本自适应缩小（TextAutoSize，9-15sp），四字母完整可见。
+- **插件页报错位置**：操作结果提示从页面顶部移到「安装插件」框下方（与触发
+  操作的输入框相邻，不再来回找）。
+
 ### 修复
 
 - **首页状态诚实化**：环境已安装但引擎未运行时，顶栏徽章显示中性「环境就绪」

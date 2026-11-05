@@ -29,8 +29,12 @@ object Downloader {
 
   private const val CONNECT_TIMEOUT = 15_000
   private const val READ_TIMEOUT = 60_000
-  /** 分段并行阈值与段数：小于 4MB 走单流；最多 8 段。 */
-  private const val SEGMENT_MIN_SIZE = 4L * 1024 * 1024
+  /**
+   * 分段并行阈值与段数：小于 1MB 走单流；最多 8 段。
+   * 旧值 4MB 是实测「rootfs 下载十来秒」的主因 —— alpine-minirootfs
+   * 只有 ~3.9MB，永远落进单流慢速路径；降到 1MB 后 4MB 文件也能 4 段并行。
+   */
+  private const val SEGMENT_MIN_SIZE = 1L * 1024 * 1024
   private const val MAX_SEGMENTS = 8
   /** 单段重试次数（慢速段超时后换 Range 续传重试）。 */
   private const val SEGMENT_RETRIES = 2

@@ -8,18 +8,18 @@ import java.io.File
  */
 object Paths {
 
-  // ---- 运行时版本（2026-10 验证） ----
+  // ---- 运行时版本（2026-11 核查） ----
   const val UBUNTU_RELEASE = "26.04.1"          // Ubuntu 26.04 LTS (Resolute Raccoon) 首个 point release
   const val UBUNTU_BASE_NAME = "ubuntu-base-26.04.1-base-arm64.tar.gz"
   const val UBUNTU_BASE_SHA256 =
     "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd"
 
-  const val NODE_VERSION = "v24.22.0"           // Node.js 24 LTS (Active LTS 至 2028-04)
-  const val NODE_TARBALL = "node-v24.22.0-linux-arm64.tar.gz"
+  const val NODE_VERSION = "v24.22.2"           // Node.js 24 LTS (Krypton，Active LTS 至 2028-04)
+  const val NODE_TARBALL = "node-v24.22.2-linux-arm64.tar.gz"
   const val NODE_SHA256 =
-    "b7e7991d5407815adfa74a2a9cd4db683552c8ce32ff4a295c22e972849c3f5d"
+    "95c264150aceb7f3437a29fd6984924f5f8d1511ea3cbd6c508b83f6c555dae2"
 
-  const val DSH_VERSION = "0.2.1-rc.2"          // @deepseek-ai/dsh npm latest
+  const val DSH_VERSION = "0.2.2-rc.1"          // @deepseek-ai/dsh npm latest（2026-11 核查）
   const val DSH_PORT = 3080
 
   // rootfs 下载镜像：官方 cdimage + 清华 TUNA（国内加速）

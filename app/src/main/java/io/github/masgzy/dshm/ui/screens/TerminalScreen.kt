@@ -24,9 +24,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -459,11 +460,15 @@ private fun androidx.compose.foundation.layout.RowScope.ModifierKey(
   ) {
     Text(
       key.label,
+      // 11 键行在窄屏上每键仅 ~30dp，15sp 的 "CTRL" 会被默认 Clip 裁成 "CTR"
+      // （真机反馈）。修法：单行 + 文本自适应缩小（autoSize），保证四字母完整可见。
       fontSize = 15.sp,
       lineHeight = 16.sp,
+      autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = 15.sp, stepSize = 1.sp),
       fontWeight = if (locked) FontWeight.Bold else FontWeight.Normal,
       color = if (active) ActiveModifierColor else ExtraKeyTextColor,
       maxLines = 1,
+      softWrap = false,
     )
     if (locked) {
       // 锁定态标识：键位底部的蓝色短横条
