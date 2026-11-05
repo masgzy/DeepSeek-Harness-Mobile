@@ -21,6 +21,8 @@ import java.io.File
 class RuntimeInstaller(private val context: Context) {
 
   private val prootRuntime = ProotRuntime(context)
+  /** RuntimeTrial（先试后切）：镜像写入后真实拉一次索引验证，失败回滚。 */
+  private val trial by lazy { RuntimeTrial(context) }
 
   val isDshInstalled: Boolean get() = Paths.dshInstalled(Paths.rootfs(context.filesDir))
 
@@ -189,6 +191,12 @@ class RuntimeInstaller(private val context: Context) {
   /**
    * 把镜像测速择优的源写入已安装容器（/etc/apt、/etc/apk）。
    * 容器未就绪 / 运行器缺失时静默返回；镜像选择为空时不做任何修改。
+   *
+   * RuntimeTrial 配套：写入完成后容器内真实拉一次索引（apk update /
+   * apt-get update）验证新源可用 —— 测速只测了首字节延迟，404/403 的索引
+   * 只有 update 才能暴露（真机实况：多个国内镜像 v3.22 路径 404/403）。
+   * 验证失败自动回滚到写入前备份（mirror-apply.sh 的 DSHM_MIRROR_REVERT），
+   * 保证容器始终留在「验证过可用」的源上。
    */
   fun applyMirrors(aptMirror: String, alpineMirror: String, onLog: (String) -> Unit) {
     val rootfsDir = Paths.rootfs(context.filesDir)
@@ -199,6 +207,36 @@ class RuntimeInstaller(private val context: Context) {
       if (alpineMirror.isNotBlank()) add("ALPINE_MIRROR=$alpineMirror")
     }
     if (envPairs.isEmpty()) return
+    val exit = runMirrorScript(rootfsDir, envPairs, revert = false, onLog = onLog)
+    AppLog.log("mirror", "镜像源应用完成 exit=$exit")
+    if (exit != 0) {
+      onLog("[mirror] 镜像源写入失败（exit=$exit），如遇安装异常请重新测速")
+      return
+    }
+    // RuntimeTrial：新源真实拉一次索引；失败回滚
+    val isAlpine = File(rootfsDir, "etc/alpine-release").isFile
+    val verify = when {
+      isAlpine && alpineMirror.isNotBlank() -> trial.verifyApkMirror(rootfsDir, onLog)
+      !isAlpine && aptMirror.isNotBlank() -> trial.verifyAptMirror(rootfsDir, onLog)
+      else -> null
+    }
+    if (verify != null && !verify.ok) {
+      AppLog.log("mirror", "镜像验证未通过（${verify.summary}），回滚到之前的源")
+      if (verify.tail.isNotEmpty()) verify.tail.takeLast(3).forEach { AppLog.log("mirror", "│ $it") }
+      onLog("[mirror] 新镜像验证未通过（${verify.summary}），自动回滚到之前的源")
+      runMirrorScript(rootfsDir, emptyList(), revert = true, onLog = onLog)
+    } else if (verify != null) {
+      onLog("[mirror] 新镜像验证通过（索引拉取成功）")
+    }
+  }
+
+  /** 执行 mirror-apply.sh（写入或回滚模式）。 */
+  private fun runMirrorScript(
+    rootfsDir: File,
+    envPairs: List<String>,
+    revert: Boolean,
+    onLog: (String) -> Unit,
+  ): Int {
     val scriptDir = File(context.filesDir, "dshm")
     scriptDir.mkdirs()
     val script = File(scriptDir, "mirror-apply.sh")
@@ -206,13 +244,13 @@ class RuntimeInstaller(private val context: Context) {
       script.outputStream().use { out -> input.copyTo(out) }
     }
     script.setExecutable(true, true)
+    val scriptEnv = if (revert) envPairs + "DSHM_MIRROR_REVERT=1" else envPairs
     val argv = prootRuntime.buildArgs(
       rootfsDir,
       listOf(script.absolutePath + ":/dshm/mirror-apply.sh"),
-      envPairs,
+      scriptEnv,
       listOf("/bin/sh", "/dshm/mirror-apply.sh"),
     )
-    val exit = runProot(argv, onLog)
-    AppLog.log("mirror", "镜像源应用完成 exit=$exit")
+    return runProot(argv, onLog)
   }
 }

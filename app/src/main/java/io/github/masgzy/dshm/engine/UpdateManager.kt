@@ -11,9 +11,13 @@ import org.json.JSONObject
 /**
  * 预装运行时更新管理器（双轨供应之「预装」通道）：
  * 从本项目 Release 下载 CI 构建的预装 bundle（Ubuntu 26.04 + Node + dsh），
- * manifest.json 驱动 + SHA-256 锁定 + 暂存目录校验后原子替换，失败自动回滚。
+ * manifest.json 驱动 + SHA-256 锁定 + 暂存目录校验 + RuntimeTrial 真实启动验证，
+ * 全部通过后原子替换，失败自动回滚保留旧环境。
  */
-class UpdateManager(private val filesDir: File) {
+class UpdateManager(
+  private val filesDir: File,
+  private val trial: RuntimeTrial? = null,
+) {
 
   private val rootfsManager = RootfsManager(filesDir)
 
@@ -59,6 +63,7 @@ class UpdateManager(private val filesDir: File) {
   fun applyRuntimeBundle(
     manifest: Manifest,
     onProgress: (step: String, done: Long, total: Long) -> Unit,
+    onLog: (String) -> Unit = {},
   ): Boolean {
     val archive = File(Paths.cache(filesDir), "dsh-runtime-${manifest.version}.tar.xz")
     onProgress("下载预装运行时 ${manifest.version}", 0, 1)
@@ -80,6 +85,19 @@ class UpdateManager(private val filesDir: File) {
       staging.deleteRecursively()
       AppLog.log("update", "预装运行时缺少 dsh 标记，拒绝启用")
       return false
+    }
+    // RuntimeTrial（先试后切）：标记存在 ≠ node/dsh 真能跑（musl/glibc 兼容、
+    // 软链完整性只有真启动才知道）。验证失败保留旧环境，绝不把坏 bundle 换上去。
+    if (trial != null) {
+      val r = trial.verifyDshStack(staging, onLog)
+      if (!r.ok) {
+        staging.deleteRecursively()
+        AppLog.log("update", "预装运行时试运行未通过，保留旧环境: ${r.summary}")
+        if (r.tail.isNotEmpty()) r.tail.takeLast(4).forEach { AppLog.log("update", "│ $it") }
+        onLog("[trial] 预装运行时验证未通过（${r.summary}），已保留当前环境")
+        return false
+      }
+      onLog("[trial] 预装运行时验证通过，提交切换")
     }
 
     val bak = File(filesDir, Paths.ROOTFS_DIR + ".bak")

@@ -17,9 +17,14 @@ import java.io.IOException
  *  3. registry 路径：任意 Docker 引用经 [DockerRegistryClient] 并行拉取
  *     （manifest → arm64 子清单 → 多层并发下载/校验/解包），国内镜像源自动回退。
  *
- * 统一产出：rootfs 暂存目录解包完成 → 原子改名启用（老 rootfs 备份后删除）。
+ * 统一产出：rootfs 暂存目录解包完成 → RuntimeTrial 隔离试运行验证 →
+ * 原子改名启用（老 rootfs 备份后删除）。试运行不通过时抛异常中止，
+ * 原 rootfs 原地不动（DSHA「先试后切」：用户拿到的永远是验证过能启动的容器）。
  */
-class RootfsManager(private val filesDir: File) {
+class RootfsManager(
+  private val filesDir: File,
+  private val trial: RuntimeTrial? = null,
+) {
 
   val rootfsDir: File get() = Paths.rootfs(filesDir)
   private val stagingDir: File get() = File(filesDir, Paths.ROOTFS_DIR + ".staging")
@@ -79,6 +84,19 @@ class RootfsManager(private val filesDir: File) {
     if (!ready) {
       onLog("rootfs 解包产物缺少 bin/sh（解包不完整？），安装中止")
       throw IOException("rootfs 解包产物不完整（bin/sh 缺失）")
+    }
+    // RuntimeTrial（先试后切）：静态检查全过也不等于能启动 —— SHA-256 校验、
+    // bin/sh 存在都拦不住「解包完整但访客链路残废」的坏 rootfs。改名提交前
+    // 在隔离 staging 里真实启动一次，失败则丢弃 staging、保留原容器。
+    if (trial != null) {
+      val r = trial.verifyBootable(staging, onLog)
+      if (!r.ok) {
+        staging.deleteRecursively()
+        AppLog.log("rootfs", "试运行验证未通过，安装中止（原容器未受影响）: ${r.summary}")
+        if (r.tail.isNotEmpty()) r.tail.takeLast(4).forEach { AppLog.log("rootfs", "│ $it") }
+        throw IOException("rootfs 试运行验证未通过（${r.summary}），已保留原容器；详情见日志")
+      }
+      onLog("[trial] 试运行验证通过，提交新 rootfs")
     }
     if (rootfsDir.exists()) {
       val bak = File(filesDir, Paths.ROOTFS_DIR + ".bak")
@@ -154,6 +172,10 @@ class RootfsManager(private val filesDir: File) {
     staging.mkdirs()
     DockerRegistryClient(cacheDir, onLog).pull(imageRef, staging, arch, onProgress)
   }
+
+  /** 当前 rootfs 是否 Alpine 族（镜像验证方式分岔用）。 */
+  val isAlpineRootfs: Boolean
+    get() = File(rootfsDir, "etc/alpine-release").isFile
 
   /** 彻底移除容器（设置页「卸载容器」）。 */
   fun uninstall() {

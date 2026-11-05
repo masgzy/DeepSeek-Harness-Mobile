@@ -29,10 +29,26 @@
   不受影响，`PROOT_SKIP_FETCH=1` 可跳过。
 - **竞品设计参考文档** `docs/design-reference.md`：DSHA / dsh-Go 的启动
   契约、停止语义、boot-cache、补丁注册表拆解与本项目决策对照表。
+- **RuntimeTrial 先试后切**（设计移植自 DSHA）：三档隔离试运行验证 ——
+  ① rootfs 安装：解包产物在隔离 staging 里真实启动一次（proot + busybox
+  sh + os-release），验证通过才改名提交，失败自动丢弃并保留原容器
+  （拦住「SHA-256 过了但访客链路残废」的坏 rootfs）；② 预装 bundle
+  升级：替换前在 staging 里验证 node/dsh 可执行；③ 镜像源写入：
+  容器内真实拉一次索引（apk update / apt-get update），验证未通过自动
+  回滚到写入前备份（mirror-apply.sh 新增 .dshm-bak 备份与
+  DSHM_MIRROR_REVERT 回滚模式）——真机实况多个国内镜像 v3.22 路径
+  404/403，首字节测速拦不住。
+- **日志彩色化 + 等级可调**：日志页四级配色（错误红 / 警告琥珀 / 成功绿 /
+  信息灰）+ 「级别」过滤（全部 / 警告 / 错误，三页通用）+ 设置页
+  「日志等级」（详细 / 标准 / 精简）控制录制阈值；应用日志结构化定级
+  （D/I/W/E），引擎原始 stdout 按关键词定级，ANSI 色码渲染前剥离；
+  轮询期高频「未找到 token」等噪音降为 DEBUG。
+- **本地构建镜像兑底**：settings.gradle.kts 仓库顺序分叉 —— CI 保持官方
+  源优先；本地构建（无 CI 变量）阿里云镜像优先，根治 Maven Central
+  限流（HTTP 429）导致 Gradle 标记仓库 disabled、构建随机失败。
 
 ### 计划中
 
-- RuntimeTrial：换容器系统/升 dsh 前在隔离目录试启动，验证通过再转正
 - SAF 文件桥：免权限导入导出设备文件
 - Digest 锁定的运行时增量更新与自动回滚
 - API Key Android Keystore 加密存储

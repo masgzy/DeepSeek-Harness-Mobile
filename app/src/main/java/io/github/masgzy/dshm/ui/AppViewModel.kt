@@ -18,6 +18,7 @@ import io.github.masgzy.dshm.engine.EngineProbe
 import io.github.masgzy.dshm.engine.PluginManager
 import io.github.masgzy.dshm.engine.RootfsManager
 import io.github.masgzy.dshm.engine.RuntimeInstaller
+import io.github.masgzy.dshm.engine.RuntimeTrial
 import io.github.masgzy.dshm.engine.UpdateManager
 import io.github.masgzy.dshm.util.AppLog
 import io.github.masgzy.dshm.util.MirrorProbe
@@ -58,10 +59,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   private val prefs: SharedPreferences =
     application.getSharedPreferences("dshm", Context.MODE_PRIVATE)
 
-  val rootfsManager = RootfsManager(application.filesDir)
+  /** RuntimeTrial（先试后切，设计移植自 DSHA）：换 rootfs / 换源 / 升 bundle 前隔离试运行验证。 */
+  private val runtimeTrial = RuntimeTrial(application)
+
+  val rootfsManager = RootfsManager(application.filesDir, runtimeTrial)
   val engineManager = EngineManager(application)
   private val runtimeInstaller = RuntimeInstaller(application)
-  private val updateManager = UpdateManager(application.filesDir)
+  private val updateManager = UpdateManager(application.filesDir, runtimeTrial)
 
   /** 应用内模型配置（凭据/自定义供应商/默认模型）与容器同步。 */
   val modelConfig = ModelConfigManager(application)
@@ -91,6 +95,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   }
 
   init {
+    // 录制阈值在进程启动即生效（设置页改后下一次写入生效，无需重启）
+    AppLog.minLevel = logLevelToMin(logLevel)
     refreshInstalled()
   }
 
@@ -138,6 +144,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   var pnpmMethod: String
     get() = prefs.getString("pnpm_method", "npm") ?: "npm"
     set(value) = prefs.edit().putString("pnpm_method", value).apply()
+
+  /**
+   * 日志录制等级（设置页「日志等级」）：debug=详细（含诊断细节）/ info=标准 /
+   * warn=精简（仅警告+错误）。写入时同步 [AppLog.minLevel]，低于阈值的行
+   * 不进内存缓冲也不落盘（引擎日志文件不受影响，始终全量）。
+   */
+  var logLevel: String
+    get() = prefs.getString("log_level", "info") ?: "info"
+    set(value) {
+      prefs.edit().putString("log_level", value).apply()
+      AppLog.minLevel = logLevelToMin(value)
+    }
+
+  private fun logLevelToMin(v: String): AppLog.Level = when (v) {
+    "debug" -> AppLog.Level.DEBUG
+    "warn" -> AppLog.Level.WARN
+    else -> AppLog.Level.INFO
+  }
 
   private val _mirrorProbe = MutableStateFlow(MirrorProbeState())
   val mirrorProbe: StateFlow<MirrorProbeState> = _mirrorProbe
@@ -353,7 +377,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       try {
         val candidate = EngineManager.webUrlFromLog(engineManager.engineLog)
         if (candidate == null) {
-          credFailLog("日志尾部未找到带 token 的地址（引擎尚未打印）")
+          // 轮询期的高频「还没打印」属于诊断细节：降为 DEBUG（等级=标准时不刷屏）
+          AppLog.d("vm", "日志尾部未找到带 token 的地址（引擎尚未打印）")
           return@launch
         }
         if (candidate == EngineManager.webUrl.value) return@launch
@@ -361,7 +386,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
           EngineProbe.UrlCheck.OK -> {
             EngineManager.webUrl.value = candidate
             lastCredFailReason = null
-            AppLog.log("vm", "日志尾部 URL 验证通过，凭据就绪")
+            AppLog.d("vm", "日志尾部 URL 验证通过，凭据就绪")
           }
           EngineProbe.UrlCheck.STALE_TOKEN -> credFailLog(
             "日志尾部 token 已失效（401：引擎换过 token 或已被占用），等待或触发引擎重启获取新地址",
@@ -498,9 +523,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       try {
         val manifest = updateManager.fetchManifest()
         appendLog("清单: v${manifest.version} node=${manifest.node} dsh=${manifest.dsh}")
-        val ok = updateManager.applyRuntimeBundle(manifest) { step, done, total ->
+        val ok = updateManager.applyRuntimeBundle(manifest, { step, done, total ->
           updateProgress(step, done, total)
-        }
+        }, { line -> appendLog(line) })
         if (!ok) throw RuntimeException("预装运行时启用失败，详见日志")
         // 预装路径同样补同步模型配置
         modelConfig.sync()

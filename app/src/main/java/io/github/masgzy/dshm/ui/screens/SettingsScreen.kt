@@ -227,10 +227,34 @@ fun SettingsScreen(
       SettingRow(
         icon = Icons.Outlined.Description,
         title = "引擎与应用日志",
-        hint = "引擎 stdout、应用运行日志与崩溃记录",
+        hint = "引擎 stdout、应用运行日志与崩溃记录（彩色分级）",
         value = null,
         onClick = onOpenLogs,
       )
+      // 日志等级（录制阈值：低于阈值的行不进日志页）
+      var logLevelIdx by remember { mutableStateOf(logLevelToIndex(viewModel.logLevel)) }
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          "日志等级",
+          fontSize = 14.sp,
+          fontWeight = FontWeight.Medium,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        CapsuleSelector(
+          options = listOf("详细", "标准", "精简"),
+          selected = logLevelIdx,
+          onSelect = { idx ->
+            logLevelIdx = idx
+            viewModel.logLevel = indexToLogLevel(idx)
+          },
+        )
+        Text(
+          "详细含诊断细节（轮询/逐镜像探测）；精简仅保留警告与错误。日志页还可用「级别」临时过滤。",
+          fontSize = 12.sp,
+          lineHeight = 16.sp,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
       if (AppLog.crashLogFile.isFile) {
         InlineAlert(
           title = "检测到崩溃记录",
@@ -462,6 +486,19 @@ private fun MirrorResultRow(result: io.github.masgzy.dshm.util.MirrorProbe.Resul
       },
     )
   }
+}
+
+/** 设置页日志等级三档与持久化值的互转。 */
+private fun logLevelToIndex(v: String): Int = when (v) {
+  "debug" -> 0
+  "warn" -> 2
+  else -> 1
+}
+
+private fun indexToLogLevel(idx: Int): String = when (idx) {
+  0 -> "debug"
+  2 -> "warn"
+  else -> "info"
 }
 
 /** 当前 apt 镜像展示名（未测速 = 未选择）。 */
