@@ -105,7 +105,12 @@ class DshmTerminalClient : TerminalSessionClient, TerminalViewClient {
   override fun onTitleChanged(changedSession: TerminalSession) {}
 
   override fun onSessionFinished(finishedSession: TerminalSession) {
-    log("终端会话已退出（exit=${finishedSession.exitStatus}）")
+    // exit=-9（SIGKILL）几乎都来自系统侧：低内存清理 / Android 12+ 幻像进程管控
+    // （App 退后台后子进程被杀）。写进日志帮用户区分「自己退出」与「被系统杀」。
+    val hint = if (finishedSession.exitStatus == -9) {
+      "（SIGKILL：多为系统内存清理或退后台进程管控，回到 App 重开终端即可）"
+    } else ""
+    log("终端会话已退出（exit=${finishedSession.exitStatus}）$hint")
     onSessionFinished?.invoke(finishedSession)
     view?.onScreenUpdated()
   }

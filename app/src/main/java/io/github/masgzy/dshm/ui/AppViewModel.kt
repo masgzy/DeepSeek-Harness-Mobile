@@ -264,13 +264,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       var ok = engineManager.startEngine(port)
       if (ok) EngineService.start(getApplication())
       ok = waitCredentials(ok, maxWait = 60_000)
-      // 自愈：进程活着但 60s 仍拿不到有效凭据（token 失效 401 / dsh web 未打印）
-      // → 重启引擎换新 token 再等一轮；干等只会永远停在「获取凭据中」
-      if (ok && EngineManager.webUrl.value == null && engineManager.isRunning) {
-        AppLog.log("vm", "60s 未获取有效凭据，自动重启引擎换新 token…")
-        ok = engineManager.restartEngine(port)
-        if (ok) EngineService.start(getApplication())
-        ok = waitCredentials(ok, maxWait = 45_000)
+      // 慢启动不等于故障（proot 冷启动 + V8 解译可超 60s，对齐 DSHA 的
+      // 「等待鉴权不设强杀时限」教训）：引擎日志仍在推进 → 延长等待；
+      // 推进停滞且进程仍活着 → 重启换 token（仅一轮）
+      if (ok && EngineManager.webUrl.value == null && engineManager.processAlive) {
+        if (engineLogProgressing()) {
+          AppLog.log("vm", "60s 无凭据但引擎日志仍在推进（慢启动），延长等待…")
+          ok = waitCredentials(ok, maxWait = 120_000)
+        }
+        if (ok && EngineManager.webUrl.value == null && engineManager.processAlive) {
+          AppLog.log("vm", "长时间未获取有效凭据，自动重启引擎换新 token…")
+          ok = engineManager.restartEngine(port)
+          if (ok) EngineService.start(getApplication())
+          ok = waitCredentials(ok, maxWait = 45_000)
+        }
       }
       // 进程拉起但已退出（启动即崩）：按失败收场，让门屏立刻给出明确错误
       if (ok && !engineManager.isRunning) {
@@ -306,13 +313,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
   private suspend fun waitCredentials(ok: Boolean, maxWait: Long): Boolean {
     var waited = 0
     // 以「带 token 的 webUrl 解析完成」为就绪标准：只探测端口会把 401 拒答
-    // 误判为可用，WebView 随即撞上认证错误页。
+    // 误判为可用，WebView 随即撞上认证错误页。进程死亡立即返回：旧实现会
+    // 傻等满 maxWait（60s+45s 连环等），启动即崩的引擎要过两分钟才报错，
+    // 用户观感就是「App 空转 4 分钟」。
     while (ok && waited < maxWait && EngineManager.webUrl.value == null) {
       Thread.sleep(1_000)
       waited += 1_000
+      if (!engineManager.processAlive) {
+        AppLog.log("vm", "引擎进程已退出，提前结束凭据等待（exit 码与尾部输出见引擎日志）")
+        return false
+      }
       if (waited % 3_000 == 0) resolveWebUrlFromLog()
     }
     return ok
+  }
+
+  /** 引擎日志最近是否有推进（mtime 距今 < 20s）：慢启动期区分「在干活」与「卡死」。 */
+  private fun engineLogProgressing(): Boolean {
+    val log = engineManager.engineLog
+    return log.isFile && System.currentTimeMillis() - log.lastModified() < 20_000
   }
 
   /**

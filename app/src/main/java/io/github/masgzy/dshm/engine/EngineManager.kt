@@ -26,6 +26,15 @@ class EngineManager(private val context: Context) {
 
   /** 全局进程与 webUrl 持有者：UI 与 EngineService 是不同实例，共享同一个引擎进程。 */
   companion object {
+    /**
+     * 引擎生命周期全局锁：current/webUrl 是 companion 级共享状态，而
+     * AppViewModel 与 EngineService（看门狗）各自持有不同的 EngineManager 实例 ——
+     * 旧实现的 @Synchronized 锁实例，两把不同的锁管同一个进程，看门狗 5s 轮询
+     * 能在 restartEngine 的 SIGTERM 窗口里插进来再拉一个 proot，双引擎抢端口
+     * 互相踩踏。所有生命周期方法一律串行在本锁上。
+     */
+    private val LOCK = Any()
+
     @Volatile
     private var current: Process? = null
 
@@ -74,6 +83,10 @@ class EngineManager(private val context: Context) {
   val isRunnerAvailable: Boolean
     get() = prootRuntime.runnerAvailable()
 
+  /** 本 App 持有的引擎进程是否存活（不看端口：外部进程占用端口与此无关）。 */
+  val processAlive: Boolean
+    get() = current?.isAlive == true
+
   /** 是否有存活的引擎进程（端口应答或进程句柄存活视为运行中）。 */
   val isRunning: Boolean
     get() = (current?.isAlive == true) || EngineProbe.check()
@@ -83,12 +96,20 @@ class EngineManager(private val context: Context) {
     get() = EngineProbe.check()
 
   /**
-   * 启动引擎。幂等：已在运行则直接返回。
-   * @return 是否成功拉起（进程启动 ≠ 服务就绪，就绪以 EngineProbe 与 webUrl 为准）。
+   * 启动引擎。幂等：本 App 的引擎进程存活则直接返回。
+   *
+   * 端口被占时的三级处理（真机反馈：Termux 手动 `dsh web` 占住 3080 时，旧实现
+   * 因端口探测假阳性直接「跳过启动」，然后永远等一个等不到的 token，主页空转
+   * 4 分钟+——proot 与 Android 共享网络栈，loopback 端口对全机可见）：
+   *  1. 日志尾部 token 验证有效 → 附着到仍在运行的引擎（App 重启收编孤儿，不重启）；
+   *  2. 本 App 特征的孤儿 proot（argv 含 rootfs+dsh+web）→ 清理后正常启动；
+   *  3. 外部进程占用（Termux/其他应用）→ 明确报错收场，绝不按端口反查误杀。
+   *
+   * @return 是否成功拉起或附着（进程启动 ≠ 服务就绪，就绪以 webUrl 为准）。
    */
-  @Synchronized
   fun startEngine(port: Int = Paths.DSH_PORT): Boolean {
-    if (isRunning) {
+    synchronized(LOCK) {
+    if (current?.isAlive == true) {
       AppLog.log("engine", "引擎已在运行，跳过启动")
       return true
     }
@@ -99,6 +120,36 @@ class EngineManager(private val context: Context) {
     if (!prootRuntime.runnerAvailable()) {
       AppLog.log("engine", "proot 运行器缺失（nativeLibraryDir 无 libdsh_proot.so/libdsh_proot_loader.so）")
       return false
+    }
+    if (EngineProbe.check(port)) {
+      // 端口有应答但没有本 App 存活句柄：孤儿（上次 App 会话遗留）或外部进程
+      val candidate = webUrlFromLog(engineLog)
+      if (candidate != null &&
+        EngineProbe.checkUrlDetailed(candidate) == EngineProbe.UrlCheck.OK
+      ) {
+        // 孤儿引擎且 token 仍有效：收编复用（外部进程的 token 不会出现在本 App
+        // 日志里，验证通过即证明是自己人）
+        webUrl.value = candidate
+        AppLog.log("engine", "附着到仍在运行的引擎（日志尾部 token 验证有效）")
+        return true
+      }
+      // 清理本 App 特征的孤儿引擎；外部进程不匹配特征、不会被误杀
+      val killed = killOrphanEngineProcesses()
+      if (killed > 0) {
+        AppLog.log("engine", "已清理 $killed 个孤儿引擎进程，等待端口释放…")
+        val deadline = System.currentTimeMillis() + 5_000
+        while (EngineProbe.check(port) && System.currentTimeMillis() < deadline) {
+          Thread.sleep(300)
+        }
+      }
+      if (EngineProbe.check(port)) {
+        AppLog.log(
+          "engine",
+          "端口 $port 被外部进程占用（非本 App 引擎，可能是 Termux 等手动运行的 dsh web）——" +
+            "启动中止。请停止该进程，或在设置中更换端口后重试",
+        )
+        return false
+      }
     }
     // 启动前把应用内模型配置并写进容器（凭据文档 + home 级 patch）：
     // 覆盖看门狗重启路径 —— 用户改完 Key 不重启 APP 也能生效。
@@ -173,6 +224,7 @@ class EngineManager(private val context: Context) {
       AppLog.log("engine", "引擎启动失败", t)
       false
     }
+    }
   }
 
   /**
@@ -180,11 +232,12 @@ class EngineManager(private val context: Context) {
    * 手段 —— dsh web 的带 token 地址只打印在启动 stdout，旧进程不会重新打印，
    * 干等永远拿不到新凭据。由 AppViewModel 在凭据等待超时后调用。
    */
-  @Synchronized
   fun restartEngine(port: Int = Paths.DSH_PORT): Boolean {
-    AppLog.log("engine", "重启引擎（获取新 token）")
-    stopEngine()
-    return startEngine(port)
+    synchronized(LOCK) {
+      AppLog.log("engine", "重启引擎（获取新 token）")
+      stopEngine()
+      return startEngine(port)
+    }
   }
 
   /**
@@ -196,8 +249,8 @@ class EngineManager(private val context: Context) {
    * 此时停止必须扫宿主 /proc 找到 proot/dsh 进程树强杀，否则 dsh web 继续应答、
    * 「点击停止不会停止」。杀完以端口探测复核。
    */
-  @Synchronized
   fun stopEngine() {
+    synchronized(LOCK) {
     val proc = current
     if (proc != null) {
       try {
@@ -222,6 +275,7 @@ class EngineManager(private val context: Context) {
     }
     current = null
     webUrl.value = null
+    }
   }
 
   /**
