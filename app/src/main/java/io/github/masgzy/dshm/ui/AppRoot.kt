@@ -102,7 +102,14 @@ fun AppRoot(viewModel: AppViewModel) {
       contentWindowInsets = WindowInsets(0, 0, 0, 0),
       topBar = {
         if (!installed || !fullScreen) {
-          AppTopBar(current = current, phase = phase, onSettings = { goTo("settings") })
+          // 首装引导期隐藏设置键：settings 路由内容在未安装时不渲染（环境屏独占
+          // 内容区），不隐藏会点进一个只有系统返回键才能离开的死页面
+          AppTopBar(
+            current = current,
+            phase = phase,
+            showSettings = installed,
+            onSettings = { goTo("settings") },
+          )
         }
       },
       bottomBar = {
@@ -111,31 +118,39 @@ fun AppRoot(viewModel: AppViewModel) {
         }
       },
     ) { _ ->
-      NavHost(
-        navController = nav,
-        startDestination = "home",
-        modifier = Modifier.fillMaxSize(),
-      ) {
-        composable("home") {
-          HomeScreen(
-            viewModel,
-            onOpenTerminal = { nav.navigate("terminal") { launchSingleTop = true } },
-          )
-        }
-        composable("plugins") { PluginsScreen(viewModel) }
-        composable("settings") {
-          SettingsScreen(
-            viewModel,
-            onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
-            onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
-          )
-        }
-        composable("logs") { LogsScreen(viewModel) }
-        composable("models") {
-          ModelsScreen(viewModel, onBack = { nav.popBackStack() })
-        }
-        composable("terminal") {
-          TerminalScreen(viewModel, onBack = { nav.popBackStack() })
+      if (!installed) {
+        // 首次引导：环境屏承担安装向导职责（装完 installedUi→true 自动流转正式界面）。
+        // 回归修复：miuix 迁移时该分支被遗漏，未安装用户直接落在主页（对话门屏），
+        // 找不到任何安装入口 —— 恢复迁移前 AppRoot 的安装态分流，环境屏在壳内
+        // 渲染（顶栏保留品牌与阶段徽章，底部导航随 installed=false 自动隐藏）。
+        EnvironmentScreen(viewModel, isOnboarding = true)
+      } else {
+        NavHost(
+          navController = nav,
+          startDestination = "home",
+          modifier = Modifier.fillMaxSize(),
+        ) {
+          composable("home") {
+            HomeScreen(
+              viewModel,
+              onOpenTerminal = { nav.navigate("terminal") { launchSingleTop = true } },
+            )
+          }
+          composable("plugins") { PluginsScreen(viewModel) }
+          composable("settings") {
+            SettingsScreen(
+              viewModel,
+              onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
+              onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
+            )
+          }
+          composable("logs") { LogsScreen(viewModel) }
+          composable("models") {
+            ModelsScreen(viewModel, onBack = { nav.popBackStack() })
+          }
+          composable("terminal") {
+            TerminalScreen(viewModel, onBack = { nav.popBackStack() })
+          }
         }
       }
     }
@@ -144,7 +159,12 @@ fun AppRoot(viewModel: AppViewModel) {
 
 /** mobile-header：miuix Surface（表面 96% 底）+ brand Header + 阶段徽章 + 设置键。 */
 @Composable
-private fun AppTopBar(current: String, phase: PhaseStyle, onSettings: () -> Unit) {
+private fun AppTopBar(
+  current: String,
+  phase: PhaseStyle,
+  showSettings: Boolean,
+  onSettings: () -> Unit,
+) {
   val p = LocalDshmPalette.current
   Surface(
     color = p.headerBg,
@@ -166,7 +186,7 @@ private fun AppTopBar(current: String, phase: PhaseStyle, onSettings: () -> Unit
         ) {
           StatusBadge(phase)
           // 首页右侧仅「应用设置」图标键（终端入口挪到首页下方，避免顶栏拥挤）
-          if (current == "home") {
+          if (current == "home" && showSettings) {
             HeaderIconButton(Icons.Outlined.Settings, "应用设置") { onSettings() }
           }
         }

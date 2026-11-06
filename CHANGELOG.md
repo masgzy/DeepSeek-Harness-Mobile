@@ -6,7 +6,7 @@
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)；
 预发布版本以 `alpha` / `beta` / `rc` 后缀标识。
 
-## [Unreleased]
+## [1.0.0-alpha.7] - 2026-11-06
 
 ### 新增
 
@@ -45,13 +45,16 @@
 
 ### 修复
 
+- **未安装回落环境屏（alpha.7 候选构建回归，P0）**：miuix 迁移时 AppRoot 丢失
+  「未安装 → 环境屏」首装引导分支，未安装用户被直接放进主页（对话门屏），
+  找不到任何安装入口 —— 恢复安装态分流：未安装时内容区渲染环境屏（壳顶栏
+  保留品牌与阶段徽章，底部导航自动隐藏），装完 installedUi→true 自动流转
+  正式界面；引导期隐藏顶栏设置键（settings 路由内容在未安装时不渲染），
+  并去掉环境屏自带 statusBarsPadding（壳顶栏已处理 inset，避免双份顶部留白）。
 - **终端 CTRL 键显示不全**：11 键行窄屏下每键 ~30dp，15sp 的 "CTRL" 被默认
   裁切成 "CTR" —— 改为文本自适应缩小（TextAutoSize，9-15sp），四字母完整可见。
 - **插件页报错位置**：操作结果提示从页面顶部移到「安装插件」框下方（与触发
   操作的输入框相邻，不再来回找）。
-
-### 修复
-
 - **首页状态诚实化**：环境已安装但引擎未运行时，顶栏徽章显示中性「环境就绪」
   （静态灰点），不再显示绿色呼吸「已就绪」；门屏说明改为「打开对话时才会
   启动本机服务（当前未运行）」——修复关闭应用再进入时误以为服务已在后台
@@ -346,7 +349,8 @@ dphmoblie/deepseek-harness-android。可从 alpha.2 覆盖安装。
   ELF，升级需先设计 exec 迁移方案）；
 - alpha 阶段未配置正式签名密钥时，Release APK 使用一次性密钥（无法覆盖升级）。
 
-[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.6...HEAD
+[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.7...HEAD
+[1.0.0-alpha.7]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.6...v1.0.0-alpha.7
 [1.0.0-alpha.6]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.5...v1.0.0-alpha.6
 [1.0.0-alpha.5]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.4...v1.0.0-alpha.5
 [1.0.0-alpha.4]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.3...v1.0.0-alpha.4
