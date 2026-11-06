@@ -268,6 +268,27 @@ class EngineManager(private val context: Context) {
   }
 
   /**
+   * proroot 启动失败的会话级自动回退：本次进程内改用 proot 重启一轮。
+   * 触发场景：proroot 的 ldso 补丁注册表不认识 guest 的 glibc 版本（实测
+   * Ubuntu 26.04 / glibc 2.43 → "patches skipped" 后 SIGSEGV exit 139），
+   * 以及其他 proroot 组件缺陷。不回写用户持久化选择（重进 App 恢复原选），
+   * 已回退过则不再重复（避免 proot 也失败时原地转圈）。
+   */
+  fun fallbackToProotAndRestart(port: Int = Paths.DSH_PORT): Boolean {
+    synchronized(LOCK) {
+      if (prootRuntime.sessionOverride == null) {
+        prootRuntime.sessionOverride = ProotRuntime.RuntimeKind.PROOT
+        AppLog.log("engine", "proroot 启动失败，本次会话自动回退 proot 重试（重进 App 后恢复所选运行时）")
+      }
+      stopEngine()
+      return startEngine(port)
+    }
+  }
+
+  /** 当前生效运行时（含会话级回退覆盖）；供启动流程判断是否需要回退。 */
+  val runtimeKind: ProotRuntime.RuntimeKind get() = prootRuntime.runtimeKind
+
+  /**
    * 停止引擎（pid 文件精确杀，典型耗时 ~1s，最坏 ~3s）。
    *
    * 时序（设计对齐 dsh-Go 的停机协议，替代旧实现「TERM proot 白等 5s」）：

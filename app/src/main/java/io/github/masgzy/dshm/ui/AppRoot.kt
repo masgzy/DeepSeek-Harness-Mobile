@@ -117,39 +117,48 @@ fun AppRoot(viewModel: AppViewModel) {
           BottomNav(current, goTo)
         }
       },
-    ) { _ ->
-      if (!installed) {
-        // 首次引导：环境屏承担安装向导职责（装完 installedUi→true 自动流转正式界面）。
-        // 回归修复：miuix 迁移时该分支被遗漏，未安装用户直接落在主页（对话门屏），
-        // 找不到任何安装入口 —— 恢复迁移前 AppRoot 的安装态分流，环境屏在壳内
-        // 渲染（顶栏保留品牌与阶段徽章，底部导航随 installed=false 自动隐藏）。
-        EnvironmentScreen(viewModel, isOnboarding = true)
-      } else {
-        NavHost(
-          navController = nav,
-          startDestination = "home",
-          modifier = Modifier.fillMaxSize(),
-        ) {
-          composable("home") {
-            HomeScreen(
-              viewModel,
-              onOpenTerminal = { nav.navigate("terminal") { launchSingleTop = true } },
-            )
-          }
-          composable("plugins") { PluginsScreen(viewModel) }
-          composable("settings") {
-            SettingsScreen(
-              viewModel,
-              onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
-              onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
-            )
-          }
-          composable("logs") { LogsScreen(viewModel) }
-          composable("models") {
-            ModelsScreen(viewModel, onBack = { nav.popBackStack() })
-          }
-          composable("terminal") {
-            TerminalScreen(viewModel, onBack = { nav.popBackStack() })
+    ) { contentPadding ->
+      // miuix Scaffold 的内容从 (0,0) 全屏铺放，顶/底栏悬浮其上，靠 contentPadding
+      // 让调用方自己避让 —— 忽略它会导致内容被上下两栏压住（真机反馈：UI 上下的
+      // 两个栏导致显示不全）。terminal 全屏时两栏均隐藏，contentPadding 退化为 0。
+      Box(
+        Modifier
+          .fillMaxSize()
+          .padding(contentPadding),
+      ) {
+        if (!installed) {
+          // 首次引导：环境屏承担安装向导职责（装完 installedUi→true 自动流转正式界面）。
+          // 回归修复：miuix 迁移时该分支被遗漏，未安装用户直接落在主页（对话门屏），
+          // 找不到任何安装入口 —— 恢复迁移前 AppRoot 的安装态分流，环境屏在壳内
+          // 渲染（顶栏保留品牌与阶段徽章，底部导航随 installed=false 自动隐藏）。
+          EnvironmentScreen(viewModel, isOnboarding = true)
+        } else {
+          NavHost(
+            navController = nav,
+            startDestination = "home",
+            modifier = Modifier.fillMaxSize(),
+          ) {
+            composable("home") {
+              HomeScreen(
+                viewModel,
+                onOpenTerminal = { nav.navigate("terminal") { launchSingleTop = true } },
+              )
+            }
+            composable("plugins") { PluginsScreen(viewModel) }
+            composable("settings") {
+              SettingsScreen(
+                viewModel,
+                onOpenLogs = { nav.navigate("logs") { launchSingleTop = true } },
+                onOpenModels = { nav.navigate("models") { launchSingleTop = true } },
+              )
+            }
+            composable("logs") { LogsScreen(viewModel) }
+            composable("models") {
+              ModelsScreen(viewModel, onBack = { nav.popBackStack() })
+            }
+            composable("terminal") {
+              TerminalScreen(viewModel, onBack = { nav.popBackStack() })
+            }
           }
         }
       }

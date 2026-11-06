@@ -93,6 +93,13 @@ class RuntimeInstaller(private val context: Context) {
     context.assets.open("scripts/boot-cache.mjs").use { input ->
       bootCache.outputStream().use { out -> input.copyTo(out) }
     }
+    // apk-tools 3（Alpine 3.23+）在 proot/proroot 下的兼容 shim：O_TMPFILE+linkat
+    // 写库与 memfd+execve(/proc/self/fd) 执行 trigger 均被路径翻译破坏。bind 到
+    // /dshm/，由 bootstrap 检测 apk-tools 3 后拷入容器并按需注入（老容器/3.22 不受影响）。
+    val apkCompat = File(scriptDir, "apk-proot-compat.so")
+    context.assets.open("scripts/apk-proot-compat.so").use { input ->
+      apkCompat.outputStream().use { out -> input.copyTo(out) }
+    }
 
     // 3) proot 内执行 bootstrap
     onProgress("容器内安装 Node.js + dsh", 0, 1)
@@ -106,6 +113,7 @@ class RuntimeInstaller(private val context: Context) {
       add(script.absolutePath + ":/dshm/bootstrap.sh")
       add(pnpmScript.absolutePath + ":/dshm/pnpm-install.sh")
       add(bootCache.absolutePath + ":/dshm/boot-cache.mjs")
+      add(apkCompat.absolutePath + ":/dshm/apk-proot-compat.so")
       add(workspace.absolutePath + ":/root/projects")
     }
     val isCn = npmRegistry == Paths.NPM_REGISTRY_CN

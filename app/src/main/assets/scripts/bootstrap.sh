@@ -67,6 +67,34 @@ fi
 # ---- 0. Alpine（musl）分支：apk 装 bash/nodejs/npm，再以 bash 重入 ----
 if [ "$DSHM_FAMILY" = "alpine" ]; then
   if [ "${DSHM_ALPINE_READY:-}" != "1" ]; then
+    # apk-tools 3（Alpine 3.23+）在 proot/proroot 下的兼容 shim：
+    #  1）apk3 用 O_TMPFILE + linkat("/proc/self/fd/N") 提交包数据库，proot 的
+    #     路径翻译下 linkat 必败 EACCES → "failed to write database: Permission
+    #     denied"（实测 3.23.7 真机复现）；shim 对 access("/proc/self/fd") 谎报
+    #     ENOENT，迫使 apk3 走「命名临时文件 + renameat」的降级路径（proot 兼容）；
+    #  2）apk3 用 memfd_create + execve("/proc/self/fd/N") 执行 trigger，proot 下
+    #     同样被拒；shim 返回 ENOSYS 令其降级为文件路径执行。
+    APK_COMPAT_SHIM_SRC="/dshm/apk-proot-compat.so"
+    APK_COMPAT_SHIM="/root/.dshm/apk-proot-compat.so"
+    APK_SHIM_ENV=""
+    mkdir -p /root/.dshm
+    if [ -f "$APK_COMPAT_SHIM_SRC" ]; then
+      cp -f "$APK_COMPAT_SHIM_SRC" "$APK_COMPAT_SHIM"
+      if apk --version 2>/dev/null | grep -q "apk-tools 3"; then
+        APK_SHIM_ENV="LD_PRELOAD=$APK_COMPAT_SHIM"
+        log "[alpine] 检测到 apk-tools 3（proot 兼容性问题），注入兼容 shim"
+      fi
+    fi
+    # apk 命令持久化 wrapper：PATH 中 /usr/local/bin 优先于 /sbin，之后容器内
+    # 一切 apk 调用（编译工具链、镜像验证、终端手动 apk）自动带 shim
+    if [ -n "$APK_SHIM_ENV" ]; then
+      mkdir -p /usr/local/bin
+      printf '%s\n' '#!/bin/sh' \
+        'SHIM=/root/.dshm/apk-proot-compat.so' \
+        '[ -f "$SHIM" ] && exec env LD_PRELOAD="$SHIM" /sbin/apk "$@"' \
+        'exec /sbin/apk "$@"' > /usr/local/bin/apk
+      chmod +x /usr/local/bin/apk
+    fi
     log "[alpine/1] 切换 apk 镜像源 ..."
     ALPINE_MIRROR="${ALPINE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/alpine}"
     # /etc/alpine-release 形如 "3.22.1"；仓库路径需要 v3.22 前缀
@@ -78,7 +106,7 @@ if [ "$DSHM_FAMILY" = "alpine" ]; then
     # optionalDependencies 的 .node 加载失败 → 回退源码编译 → 无 CMake 中止
     log "[alpine/2] apk add --no-cache bash nodejs npm coreutils libstdc++ git（需网络）..."
     # git：插件支持从 GitHub 安装（pnpm add git+https://github.com/... 硬依赖 git）
-    apk add --no-cache bash nodejs npm coreutils libstdc++ git \
+    env $APK_SHIM_ENV apk add --no-cache bash nodejs npm coreutils libstdc++ git \
       || fail "apk 安装失败（检查网络 / 镜像源：$ALPINE_MIRROR）"
     command -v node >/dev/null 2>&1 || fail "apk nodejs 安装后 node 仍不可用"
     log "  node $(node --version) / npm $(npm --version) 就绪"

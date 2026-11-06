@@ -16,6 +16,7 @@ import io.github.masgzy.dshm.engine.NodeCatalog
 import io.github.masgzy.dshm.engine.Paths
 import io.github.masgzy.dshm.engine.EngineProbe
 import io.github.masgzy.dshm.engine.PluginManager
+import io.github.masgzy.dshm.engine.ProotRuntime
 import io.github.masgzy.dshm.engine.RootfsManager
 import io.github.masgzy.dshm.engine.RuntimeInstaller
 import io.github.masgzy.dshm.engine.RuntimeTrial
@@ -308,6 +309,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         AppLog.log("vm", "引擎进程已退出（exit 码见引擎日志），按启动失败收场")
         ok = false
       }
+      // proroot 启动失败（如 glibc 2.43 超出补丁注册表 SIGSEGV）：
+      // 本次会话自动回退 proot 重试一轮，不让用户手动排查运行时切换
+      if (!ok && engineManager.runtimeKind != ProotRuntime.RuntimeKind.PROOT) {
+        ok = engineManager.fallbackToProotAndRestart(port)
+        if (ok) {
+          ok = waitCredentials(ok, maxWait = 60_000)
+          if (ok && !engineManager.isRunning) {
+            AppLog.log("vm", "回退后引擎进程已退出，按启动失败收场")
+            ok = false
+          }
+        }
+      }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       AppLog.log("vm", "startEngine ok=$ok ready=${engineManager.isRunning} url=${EngineManager.webUrl.value != null}")
       onDone?.let { withContext(Dispatchers.Main) { it(ok) } }
@@ -327,6 +340,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
       if (ok && !engineManager.isRunning) {
         AppLog.log("vm", "引擎进程已退出（exit 码见引擎日志），按启动失败收场")
         ok = false
+      }
+      // proroot 重启失败同样走会话级回退（与 startEngine 同策略）
+      if (!ok && engineManager.runtimeKind != ProotRuntime.RuntimeKind.PROOT) {
+        ok = engineManager.fallbackToProotAndRestart(port)
+        if (ok) {
+          ok = waitCredentials(ok, maxWait = 60_000)
+          if (ok && !engineManager.isRunning) {
+            AppLog.log("vm", "回退后引擎进程已退出，按启动失败收场")
+            ok = false
+          }
+        }
       }
       withContext(Dispatchers.Main) { _engineRunning.value = engineManager.isRunning }
       onDone?.let { withContext(Dispatchers.Main) { it(ok) } }

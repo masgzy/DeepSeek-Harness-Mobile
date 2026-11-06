@@ -190,7 +190,7 @@ fun SettingsScreen(
             missing.isNotEmpty() ->
               "proroot 缺少组件：${missing.joinToString()} —— 请从官方 Release 重新下载 APK。当前将回退用 proot 启动。"
             else ->
-              "proroot：进程内路径翻译、无 ptrace，引擎启动更快（实验性）；如遇异常请切回 proot。"
+              "proroot：进程内路径翻译、无 ptrace，引擎启动更快（实验性）；glibc 2.43+ 容器（Ubuntu 26.04）暂不兼容，启动失败时本次会话自动回退 proot。"
           },
           fontSize = 12.sp,
           lineHeight = 17.sp,

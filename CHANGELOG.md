@@ -6,6 +6,32 @@
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)；
 预发布版本以 `alpha` / `beta` / `rc` 后缀标识。
 
+## [1.0.0-alpha.8] - 2026-11-06
+
+### 修复
+
+- **Alpine 3.23 安装失败（P0，apk-tools v3 × proot 不兼容）**：Alpine 3.23 起
+  apk 升级到 v3（libapk 3.0.8），其原子写库用 O_TMPFILE + linkat("/proc/self/fd/N")
+  提交，proot 路径翻译下必败 EACCES —— 报 "System state may be inconsistent:
+  failed to write database: Permission denied"，所有包已解完却在最后一步写库
+  失败（3.23.7 真机实测，沙箱内 shim 模拟 proot 缺陷后逐字复现）；apk v3 用
+  memfd+execve("/proc/self/fd") 执行 trigger 同类被拒（termux/proot-distro#595、
+  alpinelinux/alpine-make-rootfs#28）。修复：新增 `scripts/apk-proot-compat.c`
+  （~3.5KB musl LD_PRELOAD shim）——拦 access("/proc/self/fd")→ENOENT 令 apk3
+  走「命名临时文件 + renameat」降级路径、拦 memfd_create→ENOSYS 令 trigger 走
+  文件路径执行；bootstrap 检测 apk-tools 3 后注入（3.22/apk2 不受影响），并以
+  `/usr/local/bin/apk` wrapper 持久化（编译工具链 apk、镜像验证 apk update、
+  终端手动 apk 全部自动带 shim）。
+- **proroot 引擎 SIGSEGV 自动回退（glibc 2.43）**：proroot 的 ldso 补丁注册表
+  不认识 glibc 2.43（Ubuntu 26.04）→ "patches skipped" 后 SIGSEGV exit 139
+  （真机实测）。修复：proroot 启动失败（快速退出/凭据未就绪）时本次会话自动
+  回退 proot 重启一轮并日志说明，不回写用户持久化选择（重进 App 恢复原选）；
+  设置页 proroot 说明明示该不兼容。
+- **UI 内容被上下两栏遮挡**：miuix Scaffold 的内容从 (0,0) 全屏铺放、顶/底栏
+  悬浮其上，靠 contentPadding 让调用方避让 —— 迁移时忽略了该参数，内容头部/
+  尾部被两栏压住（真机反馈「上下的两个栏导致显示不全」）。修复：内容区统一
+  应用 contentPadding（terminal 全屏时两栏隐藏、padding 退化为 0，不受影响）。
+
 ## [1.0.0-alpha.7] - 2026-11-06
 
 ### 新增
@@ -349,7 +375,8 @@ dphmoblie/deepseek-harness-android。可从 alpha.2 覆盖安装。
   ELF，升级需先设计 exec 迁移方案）；
 - alpha 阶段未配置正式签名密钥时，Release APK 使用一次性密钥（无法覆盖升级）。
 
-[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.7...HEAD
+[Unreleased]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.8...HEAD
+[1.0.0-alpha.8]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.7...v1.0.0-alpha.8
 [1.0.0-alpha.7]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.6...v1.0.0-alpha.7
 [1.0.0-alpha.6]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.5...v1.0.0-alpha.6
 [1.0.0-alpha.5]: https://github.com/masgzy/DeepSeek-Harness-Mobile/compare/v1.0.0-alpha.4...v1.0.0-alpha.5

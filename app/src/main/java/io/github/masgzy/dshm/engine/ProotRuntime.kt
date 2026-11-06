@@ -50,14 +50,24 @@ class ProotRuntime(private val context: Context) {
 
   enum class RuntimeKind(val id: String, val label: String, val desc: String) {
     PROOT("proot", "proot", "Termux · ptrace 翻译 · 稳定"),
-    PROROOT("proroot", "proroot", "零 ptrace · 启动更快 · 实验性"),
+    // glibc 2.43（Ubuntu 26.04）超出 proroot 补丁注册表：ldso 补丁跳过后 SIGSEGV
+    // （真机实测），故描述明示不兼容；启动失败时 AppViewModel 自动回退 proot
+    PROROOT("proroot", "proroot", "零 ptrace · 更快 · 实验性（glibc 2.43+ 不兼容，失败自动回退 proot）"),
   }
 
   private val prefs = context.getSharedPreferences("dshm", Context.MODE_PRIVATE)
 
+  /**
+   * 本会话运行时覆盖（proroot 启动失败自动回退 proot 用）：
+   * 非 null 时 [runtimeKind] 返回覆盖值，不回写用户持久化选择 —— 重进 App 后
+   * 恢复用户原选；覆盖只影响当前进程内的全部 buildArgs/hostEnv 调用。
+   */
+  @Volatile
+  var sessionOverride: RuntimeKind? = null
+
   /** 用户选择的容器运行时（默认 proot；值非法时回退 proot）。 */
   val runtimeKind: RuntimeKind
-    get() = when (prefs.getString(PREF_RUNTIME, RuntimeKind.PROOT.id)) {
+    get() = sessionOverride ?: when (prefs.getString(PREF_RUNTIME, RuntimeKind.PROOT.id)) {
       RuntimeKind.PROROOT.id -> RuntimeKind.PROROOT
       else -> RuntimeKind.PROOT
     }
